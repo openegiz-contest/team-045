@@ -1,0 +1,774 @@
+{
+ "uid": "sarybulak-plant-energy",
+ "title": "Sarybulak: фабрика и энергетика",
+ "tags": [
+  "sarybulak",
+  "openegiz"
+ ],
+ "timezone": "browser",
+ "editable": true,
+ "refresh": "5s",
+ "schemaVersion": 39,
+ "version": 1,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 29,
+   "type": "stat",
+   "title": "Мельницы, т/ч",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:mill\" and r._field == \"value_throughput_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "blue"
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 30,
+   "type": "stat",
+   "title": "Удельная энергия измельчения, кВт·ч/т",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:mill\" and r._field == \"value_specific_energy_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "purple"
+     },
+     "decimals": 2
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 31,
+   "type": "stat",
+   "title": "Извлечение, %",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:flotation\" and r._field == \"value_recovery_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "green"
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 32,
+   "type": "stat",
+   "title": "Концентрат, т/ч",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:flotation\" and r._field == \"value_concentrate_tph_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "green"
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 33,
+   "type": "stat",
+   "title": "Хвосты, % Cu",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:flotation\" and r._field == \"value_tailings_grade_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "text"
+     },
+     "decimals": 3
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 34,
+   "type": "stat",
+   "title": "Электроэнергия всего, кВт·ч",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:substation\" and r._field == \"value_energy_total_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "value",
+    "justifyMode": "auto"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "purple"
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 35,
+   "type": "timeseries",
+   "title": "Мощность: дробилка, мельницы, подстанция, кВт",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:crusher\" and r._field == \"value_power_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:mill\" and r._field == \"value_power_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:substation\" and r._field == \"value_load_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "C"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatt",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 36,
+   "type": "timeseries",
+   "title": "Питание фабрики и извлечение",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:mill\" and r._field == \"value_feed_grade_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:flotation\" and r._field == \"value_recovery_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "B"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 37,
+   "type": "timeseries",
+   "title": "Дизель: расход парка, л/ч",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:substation\" and r._field == \"value_diesel_rate_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 38,
+   "type": "timeseries",
+   "title": "Расход топлива по самосвалам, л/ч",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and r._field == \"value_fuel_rate_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 39,
+   "type": "timeseries",
+   "title": "Загрузка подстанции, %",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:substation\" and r._field == \"value_load_pct_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     },
+     "min": 0,
+     "max": 100
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 40,
+   "type": "timeseries",
+   "title": "CO₂ нарастающим итогом, т",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 20,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:substation\" and r._field == \"value_co2_total_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 41,
+   "type": "timeseries",
+   "title": "Бункер дробилки, т",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:crusher\" and r._field == \"value_bin_level_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "t",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     },
+     "min": 0
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 42,
+   "type": "timeseries",
+   "title": "Концентрат нарастающим итогом, т",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.sarybulak:flotation\" and r._field == \"value_concentrate_total_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "t",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ },
+ "links": [
+  {
+   "title": "Карта карьера",
+   "type": "link",
+   "url": "http://localhost:8095/",
+   "targetBlank": true
+  },
+  {
+   "title": "Обзор",
+   "type": "link",
+   "url": "/d/sarybulak-overview"
+  },
+  {
+   "title": "Парк",
+   "type": "link",
+   "url": "/d/sarybulak-fleet"
+  },
+  {
+   "title": "Фабрика и энергия",
+   "type": "link",
+   "url": "/d/sarybulak-plant-energy"
+  },
+  {
+   "title": "Карта в Grafana",
+   "type": "link",
+   "url": "/d/sarybulak-map"
+  }
+ ]
+}

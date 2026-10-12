@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карьер Сарыбұлақ: цифровой двойник</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #161c24; --panel2: #1d2530; --line: #2a3441; --text: #e6edf3; --muted: #8b98a8;
+    --ore: #f59e0b; --ore2: #dc2626; --waste: #64748b; --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444; --blue: #38bdf8;
+    --road: #3b4654; --road-closed: #ef4444; --ground: #1a2129; --pit: #243040;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  #app { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
+  header { display: flex; align-items: center; gap: 18px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; background: var(--panel2); border: 1px solid var(--line); }
+  .badge.active { background: #3a2a0a; border-color: var(--warn); color: #fcd34d; }
+  main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+  #mapwrap { position: relative; min-width: 0; background: var(--ground); }
+  svg#map { width: 100%; height: 100%; display: block; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .kpi { background: var(--panel2); border-radius: 6px; padding: 6px 8px; }
+  .kpi .v { font-size: 18px; font-weight: 600; }
+  .kpi .l { font-size: 11px; color: var(--muted); }
+  .scen { display: flex; flex-direction: column; gap: 6px; }
+  .scen button { text-align: left; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; cursor: pointer; font: inherit; }
+  .scen button:hover { border-color: var(--blue); }
+  .scen button.on { border-color: var(--warn); background: #3a2a0a; }
+  .scen button .t { display: block; font-weight: 600; }
+  .scen button .e { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .scen .reset { background: #0f2a1a; border-color: var(--ok); }
+  .events { font-size: 12px; max-height: 220px; overflow-y: auto; }
+  .events div { padding: 3px 0; border-bottom: 1px dashed var(--line); color: #c9d4df; }
+  .events span { color: var(--muted); margin-right: 6px; }
+  #tooltip { position: absolute; pointer-events: none; background: #0b0f14ee; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; max-width: 320px; display: none; z-index: 10; }
+  #tooltip b { color: var(--blue); }
+  #tooltip table { border-collapse: collapse; margin-top: 4px; }
+  #tooltip td { padding: 1px 6px 1px 0; color: #c9d4df; }
+  #tooltip td:first-child { color: var(--muted); }
+  .legend { position: absolute; left: 10px; bottom: 10px; background: #0b0f14cc; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .zoom { position: absolute; left: 10px; top: 10px; display: flex; gap: 4px; }
+  .zoom button { background: #0b0f14cc; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  .zoom button:hover { border-color: var(--blue); }
+  .status { position: absolute; right: 10px; top: 10px; font-size: 11px; color: var(--muted); background: #0b0f14cc; padding: 4px 8px; border-radius: 6px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 60vh 1fr; } aside { border-left: 0; border-top: 1px solid var(--line); } }
+  @keyframes pulse { 0% { opacity: .35 } 50% { opacity: 1 } 100% { opacity: .35 } }
+  .pulse { animation: pulse 1.6s infinite; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Карьер Сарыбұлақ</h1>
+    <span class="sub">цифровой двойник на OpenEgiz · Eclipse Ditto · <span id="ns"></span></span>
+    <span class="spacer"></span>
+    <span class="badge" id="simtime">смена: — ч</span>
+    <span class="badge" id="scenbadge">сценарии: нет</span>
+  </header>
+  <main>
+    <div id="mapwrap">
+      <svg id="map" viewBox="80 230 1620 800" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="8" stroke="#ffffff55" stroke-width="2"/>
+          </pattern>
+          <pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse">
+            <circle cx="3" cy="3" r="1.2" fill="#ffffff88"/>
+          </pattern>
+          <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <g id="terrain"></g>
+        <g id="roads"></g>
+        <g id="blocks"></g>
+        <g id="facilities"></g>
+        <g id="trucks"></g>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#64748b"></i>порода (&lt; борт)</span>
+        <span><i style="background:#f59e0b"></i>руда, бедная</span>
+        <span><i style="background:#dc2626"></i>руда, богатая</span>
+        <span><i style="background:url(#hatch);background-color:#555"></i>бурение/заряжание</span>
+        <span><i style="background:#0f1419;border:1px solid #666"></i>отработан</span>
+        <span><i style="background:#3b4654"></i>дорога</span>
+        <span><i style="background:#ef4444"></i>закрыта</span>
+      </div>
+      <div class="status" id="status">подключение…</div>
+      <div class="zoom">
+        <button id="z-pit" title="Приблизить карьер">карьер</button>
+        <button id="z-plant" title="Приблизить фабрику">фабрика</button>
+        <button id="z-all" title="Весь рудник">весь</button>
+        <button id="z-in">+</button><button id="z-out">−</button>
+      </div>
+      <div id="tooltip"></div>
+    </div>
+    <aside>
+      <section>
+        <h2>Показатели смены</h2>
+        <div class="kpis" id="kpis"></div>
+      </section>
+      <section>
+        <h2>Сценарии «что если»</h2>
+        <div class="scen" id="scen"></div>
+      </section>
+      <section>
+        <h2>Журнал событий</h2>
+        <div class="events" id="events"></div>
+      </section>
+    </aside>
+  </main>
+</div>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (parent) parent.appendChild(e); return e; };
+  const fmt = (v, d = 0) => (v === undefined || v === null || isNaN(v)) ? '—' : Number(v).toLocaleString('ru-RU', { maximumFractionDigits: d, minimumFractionDigits: d });
+
+  let twins = {}, byKind = {}, scenarios = [], activeScen = '', cutoff = 0.25;
+  let trucksPrev = {}, trucksNext = {}, lastPoll = 0, pollPeriod = 1000;
+  let blocksSig = '', roadsSig = '';
+  const T = { terrain: $('#terrain'), roads: $('#roads'), blocks: $('#blocks'), fac: $('#facilities'), trucks: $('#trucks') };
+  const tooltip = $('#tooltip');
+
+  const name = (id) => id.split(':')[1];
+  const gradeColor = (g) => {
+    if (g < cutoff) return '#64748b';
+    const t = Math.max(0, Math.min(1, (g - cutoff) / (1.0 - cutoff)));
+    const a = [245, 158, 11], b = [220, 38, 38];
+    return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',')})`;
+  };
+  const stateColor = { loading: '#f59e0b', hauling: '#f97316', returning: '#38bdf8', to_face: '#38bdf8', dumping: '#a3e635', idle: '#94a3b8', down: '#ef4444', service: '#ef4444', parked: '#475569', blocked: '#ef4444', refueling: '#22c55e', to_fuel: '#22c55e', spotting: '#f59e0b', waiting: '#64748b', crushing: '#22c55e', no_block: '#ef4444' };
+  const ruState = { loading: 'погрузка', hauling: 'гружёный рейс', returning: 'порожний рейс', to_face: 'к экскаватору', dumping: 'разгрузка', idle: 'ожидание наряда', down: 'ремонт (отказ)', service: 'плановое ТО', parked: 'выведен из работы', blocked: 'нет маршрута', refueling: 'заправка', to_fuel: 'на АЗС', spotting: 'подъезд под ковш', queued_at_face: 'очередь у забоя', queued_at_crusher: 'очередь на дробилку', queued_at_stockpile: 'очередь на склад', queued_at_dump: 'очередь на отвал', queued_at_fuel: 'очередь на АЗС', waiting: 'ждёт самосвал', crushing: 'дробит', no_block: 'нет взорванного блока', open: 'открыта', closed: 'закрыта', insitu: 'в массиве', drilling: 'бурение', charged: 'заряжен', blasted: 'взорван', mining: 'отработка', mined: 'отработан', running: 'работает', starved: 'нет питания', crusher_down: 'дробилка стоит', grinding: 'измельчение', normal: 'норма' };
+  const rs = (s) => ruState[s] || s;
+
+  // ---------------------------------------------------------------- tooltip
+  function showTip(evt, id) {
+    const t = twins[id]; if (!t) return;
+    const rows = Object.entries(t.f).map(([k, v]) => `<tr><td>${k}</td><td>${typeof v === 'number' ? fmt(v, 2) : rs(String(v))} ${t.u[k] || ''}</td></tr>`).join('');
+    tooltip.innerHTML = `<b>${t.a.name || id}</b><div style="color:#8b98a8">${id}</div><table>${rows}</table>`;
+    tooltip.style.display = 'block';
+    moveTip(evt);
+  }
+  function moveTip(evt) {
+    const r = $('#mapwrap').getBoundingClientRect();
+    let x = evt.clientX - r.left + 14, y = evt.clientY - r.top + 14;
+    if (x + 330 > r.width) x = evt.clientX - r.left - 330;
+    if (y + 260 > r.height) y = Math.max(0, evt.clientY - r.top - 260);
+    tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+  }
+  const hideTip = () => tooltip.style.display = 'none';
+  function hoverable(node, id) { node.addEventListener('mousemove', (e) => showTip(e, id)); node.addEventListener('mouseleave', hideTip); node.style.cursor = 'pointer'; }
+
+  // ---------------------------------------------------------------- static layers
+  function drawTerrain() {
+    T.terrain.innerHTML = '';
+    // pit rim and bench terraces, drawn around the bench grids from the twins
+    const benches = byKind.bench || [];
+    if (!benches.length) return;
+    const xs = [], ys = [];
+    benches.forEach(b => { const a = twins[b].a; xs.push(a.origin_x, a.origin_x + a.cols * a.block_size_m); ys.push(a.origin_y, a.origin_y + a.rows * a.block_size_m); });
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2 + 60, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    [[1.0, '#1c232c'], [0.82, '#202a35'], [0.66, '#243040'], [0.5, '#2a3848']].forEach(([k, col]) =>
+      el('ellipse', { cx, cy, rx: 420 * k, ry: 330 * k, fill: col, stroke: '#3a4656', 'stroke-width': 1.5 }, T.terrain));
+    benches.forEach(b => {
+      const a = twins[b].a;
+      el('text', { x: a.origin_x, y: a.origin_y - 8, fill: '#9fb0c3', 'font-size': 13 }, T.terrain).textContent = `${a.name}`;
+    });
+    el('text', { x: cx - 40, y: cy + 300, fill: '#5f7187', 'font-size': 12 }, T.terrain).textContent = 'карьер';
+  }
+
+  function drawRoads() {
+    const roads = byKind.road || [];
+    const sig = roads.map(r => r + twins[r].f.status).join();
+    if (sig === roadsSig) return; roadsSig = sig;
+    T.roads.innerHTML = '';
+    roads.forEach(id => {
+      const t = twins[id], pts = (t.a.polyline || []).map(p => p.join(',')).join(' ');
+      const closed = t.f.status === 'closed';
+      const g = el('g', {}, T.roads);
+      el('polyline', { points: pts, fill: 'none', stroke: '#0b0f14', 'stroke-width': 22, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, g);
+      el('polyline', { points: pts, fill: 'none', stroke: closed ? '#ef4444' : '#3b4654', 'stroke-width': 16, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-dasharray': closed ? '18 12' : '' }, g);
+      el('polyline', { points: pts, fill: 'none', stroke: closed ? '#7f1d1d' : '#8b98a8', 'stroke-width': 1.2, 'stroke-dasharray': '10 10', opacity: .6 }, g);
+      hoverable(g, id);
+    });
+  }
+
+  function drawBlocks() {
+    const blocks = byKind.block || [];
+    const sig = blocks.map(b => b + twins[b].f.status + twins[b].f.material + Math.round(twins[b].f.tonnes_remaining / 500)).join() + cutoff;
+    if (sig === blocksSig) return; blocksSig = sig;
+    T.blocks.innerHTML = '';
+    const exByBlock = {};
+    (byKind.excavator || []).forEach(e => { const b = twins[e].f.block; if (b) exByBlock[b] = e; });
+    blocks.forEach(id => {
+      const t = twins[id], a = t.a, f = t.f, s = a.size_m;
+      const x = a.x - s / 2, y = a.y - s / 2;
+      const g = el('g', {}, T.blocks);
+      const isOre = f.material ? f.material === 'ore' : a.grade_pct >= cutoff;
+      let fill = isOre ? gradeColor(a.grade_pct) : '#64748b';
+      if (f.status === 'mined') fill = '#0f1419';
+      const frac = f.tonnes_remaining / a.tonnes_insitu;
+      el('rect', { x, y, width: s, height: s, fill, stroke: '#0b0f14', 'stroke-width': 1, opacity: f.status === 'mined' ? 1 : 0.55 + 0.45 * frac }, g);
+      if (f.status === 'drilling') el('rect', { x, y, width: s, height: s, fill: 'url(#hatch)' }, g);
+      if (f.status === 'charged') el('rect', { x, y, width: s, height: s, fill: 'url(#dots)' }, g);
+      if (f.status === 'blasted') el('rect', { x: x + 2, y: y + 2, width: s - 4, height: s - 4, fill: 'none', stroke: '#fde68a', 'stroke-width': 1.5, 'stroke-dasharray': '3 2' }, g);
+      if (f.status === 'mining') { const r = el('rect', { x: x - 2, y: y - 2, width: s + 4, height: s + 4, fill: 'none', stroke: '#ffffff', 'stroke-width': 2.5 }, g); r.classList.add('pulse'); }
+      el('text', { x: a.x, y: a.y + 3, fill: f.status === 'mined' ? '#475569' : '#0b0f14', 'font-size': 8, 'text-anchor': 'middle', 'font-weight': 600 }, g).textContent = a.grade_pct.toFixed(2);
+      hoverable(g, id);
+    });
+  }
+
+  function facilityIcon(g, kind, x, y, t) {
+    const f = t.f, lbl = (txt, dy, size = 12, col = '#c9d4df') => el('text', { x, y: y + dy, fill: col, 'font-size': size, 'text-anchor': 'middle' }, g).textContent = txt;
+    if (kind === 'crusher') {
+      const col = f.state === 'down' ? '#ef4444' : f.state === 'crushing' ? '#22c55e' : '#94a3b8';
+      el('rect', { x: x - 34, y: y - 26, width: 68, height: 52, rx: 4, fill: '#2b3644', stroke: col, 'stroke-width': 3 }, g);
+      el('polygon', { points: `${x - 22},${y - 16} ${x + 22},${y - 16} ${x + 10},${y + 14} ${x - 10},${y + 14}`, fill: col, opacity: .8 }, g);
+      const binH = 40 * Math.min(1, (f.bin_level || 0) / (t.a.bin_capacity_t || 600));
+      el('rect', { x: x + 40, y: y + 20 - binH, width: 10, height: binH, fill: '#f59e0b' }, g);
+      el('rect', { x: x + 40, y: y - 20, width: 10, height: 40, fill: 'none', stroke: '#64748b' }, g);
+      lbl('Дробилка', -34, 13, '#e6edf3'); lbl(`${fmt(f.throughput)} т/ч · ${fmt(f.feed_grade, 2)} % Cu`, 42, 11);
+      if (f.queue) lbl(`очередь ${f.queue}`, 56, 11, '#fcd34d');
+    } else if (kind === 'stockpile') {
+      const h = 10 + 40 * Math.min(1, (f.tonnes || 0) / (t.a.capacity_t || 60000));
+      el('polygon', { points: `${x - 50},${y + 20} ${x},${y + 20 - h} ${x + 50},${y + 20}`, fill: '#b45309', stroke: '#f59e0b', 'stroke-width': 2 }, g);
+      lbl('Рудный склад', -40, 13, '#e6edf3'); lbl(`${fmt(f.tonnes / 1000, 1)} кт · ${fmt(f.grade, 2)} % Cu`, 38, 11);
+      if (f.reclaiming > 0) lbl(`⇢ на дробилку ${fmt(f.reclaiming)} т/ч`, 52, 11, '#22c55e');
+    } else if (kind === 'waste-dump') {
+      const h = 14 + 30 * Math.min(1, (f.tonnes || 0) / 200000);
+      el('ellipse', { cx: x, cy: y + 10, rx: 70, ry: h, fill: '#3f3f46', stroke: '#71717a', 'stroke-width': 2 }, g);
+      lbl('Отвал породы', -h - 4, 13, '#e6edf3'); lbl(`${fmt(f.tonnes / 1000, 1)} кт`, h + 26, 11);
+    } else if (kind === 'fuel-station') {
+      el('rect', { x: x - 18, y: y - 14, width: 36, height: 28, rx: 3, fill: '#064e3b', stroke: '#22c55e', 'stroke-width': 2 }, g);
+      lbl('⛽', 5, 14); lbl('АЗС', -20, 12, '#e6edf3'); lbl(`${fmt(f.diesel_issued_l / 1000, 1)} тыс. л`, 28, 10);
+    } else if (kind === 'plant') {
+      const col = f.state === 'running' ? '#22c55e' : '#ef4444';
+      el('rect', { x: x - 60, y: y - 30, width: 120, height: 60, rx: 4, fill: '#1f2937', stroke: col, 'stroke-width': 3 }, g);
+      el('rect', { x: x - 50, y: y - 60, width: 10, height: 30, fill: '#374151' }, g);
+      el('rect', { x: x - 30, y: y - 50, width: 10, height: 20, fill: '#374151' }, g);
+      const mill = twins[`${t.ns}:mill`], flo = twins[`${t.ns}:flotation`];
+      lbl('Обогатительная фабрика', -66, 13, '#e6edf3');
+      if (mill) lbl(`мельницы ${fmt(mill.f.throughput)} т/ч · ${fmt(mill.f.power / 1000, 1)} МВт`, -8, 11);
+      if (flo) lbl(`флотация: извлечение ${fmt(flo.f.recovery, 1)} % · ${fmt(flo.f.concentrate_tph, 1)} т/ч конц.`, 10, 11);
+      lbl(rs(f.state), 26, 11, col);
+    } else if (kind === 'substation') {
+      const pct = f.load_pct || 0, col = pct > 85 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#38bdf8';
+      el('rect', { x: x - 28, y: y - 20, width: 56, height: 40, rx: 3, fill: '#111827', stroke: col, 'stroke-width': 2 }, g);
+      lbl('⚡', 6, 18); lbl('Подстанция', -26, 12, '#e6edf3'); lbl(`${fmt(f.load / 1000, 1)} МВт (${fmt(pct)} %)`, 34, 11, col);
+      lbl(`дизель ${fmt(f.diesel_rate)} л/ч`, 48, 10);
+    } else if (kind === 'junction') {
+      el('circle', { cx: x, cy: y, r: 9, fill: '#3b4654', stroke: '#8b98a8', 'stroke-width': 1.5 }, g);
+      lbl(t.a.name, -14, 10, '#8b98a8');
+    } else if (kind === 'face') {
+      // the face itself is quiet; the excavator is drawn on top
+      if (f.queue) lbl(`очередь: ${f.queue}`, 44, 11, '#fcd34d');
+    }
+  }
+
+  function drawFacilities() {
+    T.fac.innerHTML = '';
+    const kinds = ['junction', 'face', 'waste-dump', 'stockpile', 'fuel-station', 'crusher', 'plant', 'substation'];
+    kinds.forEach(k => (byKind[k] || []).forEach(id => {
+      const t = twins[id]; t.ns = id.split(':')[0];
+      const g = el('g', {}, T.fac);
+      facilityIcon(g, k, t.a.x, t.a.y, t);
+      hoverable(g, id);
+    }));
+    // excavators sit at their face node
+    (byKind.excavator || []).forEach(id => {
+      const t = twins[id], face = twins[`${id.split(':')[0]}:${(twins[t.a.bench] || { a: {} }).a.face_node}`];
+      if (!face) return;
+      const x = face.a.x, y = face.a.y, col = stateColor[t.f.state] || '#94a3b8';
+      const g = el('g', {}, T.fac);
+      el('circle', { cx: x, cy: y, r: 22, fill: '#1f2937', stroke: col, 'stroke-width': 4, filter: t.f.state === 'loading' ? 'url(#glow)' : '' }, g);
+      el('path', { d: `M${x - 10},${y + 6} l6,-14 l12,0 l6,6 l-6,6 l-8,0 l-4,8 z`, fill: col }, g);
+      el('text', { x, y: y - 30, fill: '#e6edf3', 'font-size': 12, 'text-anchor': 'middle', 'font-weight': 600 }, g).textContent = t.a.name.split(' (')[0];
+      el('text', { x, y: y + 36, fill: col, 'font-size': 11, 'text-anchor': 'middle' }, g).textContent = `${rs(t.f.state)}${t.f.block ? ' · ' + t.f.block.replace('block-', '') : ''}`;
+      hoverable(g, id);
+    });
+  }
+
+  // ---------------------------------------------------------------- trucks (animated)
+  function drawTrucks(now) {
+    const a = Math.max(0, Math.min(1, (now - lastPoll) / pollPeriod));
+    (byKind['haul-truck'] || []).forEach(id => {
+      const t = twins[id], f = t.f;
+      const p0 = trucksPrev[id] || { x: f.x, y: f.y }, p1 = trucksNext[id] || { x: f.x, y: f.y };
+      const x = p0.x + (p1.x - p0.x) * a, y = p0.y + (p1.y - p0.y) * a;
+      const ang = (Math.abs(p1.x - p0.x) + Math.abs(p1.y - p0.y) > 1) ? Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180 / Math.PI : (t._ang || 0);
+      t._ang = ang;
+      let g = T.trucks.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (!g) {
+        g = el('g', { 'data-id': id }, T.trucks);
+        el('rect', { class: 'body', x: -16, y: -9, width: 32, height: 18, rx: 3 }, g);
+        el('rect', { class: 'cab', x: 8, y: -7, width: 8, height: 14, rx: 2, fill: '#0b0f14' }, g);
+        el('rect', { class: 'load', x: -13, y: -6, width: 18, height: 12, rx: 2 }, g);
+        el('circle', { class: 'st', cx: 0, cy: -16, r: 5 }, g);
+        el('text', { class: 'lbl', y: 30, 'font-size': 11, 'text-anchor': 'middle', fill: '#e6edf3', 'font-weight': 600 }, g);
+        el('text', { class: 'lbl2', y: 42, 'font-size': 10, 'text-anchor': 'middle', fill: '#8b98a8' }, g);
+        hoverable(g, id);
+      }
+      const body = g.querySelector('.body'), load = g.querySelector('.load'), st = g.querySelector('.st');
+      const col = stateColor[f.state] || '#94a3b8';
+      body.setAttribute('fill', '#eab308'); body.setAttribute('stroke', col); body.setAttribute('stroke-width', 2.5);
+      const loaded = f.payload > 1;
+      load.setAttribute('fill', loaded ? (f.material === 'ore' ? gradeColor(Math.max(cutoff, f.load_grade)) : '#64748b') : '#3b4654');
+      load.setAttribute('opacity', loaded ? 1 : 0.5);
+      st.setAttribute('fill', col);
+      g.querySelector('.lbl').textContent = id.split(':')[1].replace('truck-', 'HT-');
+      g.querySelector('.lbl2').textContent = `${rs(f.state)}${loaded ? ' · ' + fmt(f.payload) + ' т' : ''}`;
+      g.setAttribute('transform', `translate(${x},${y})`);
+      g.querySelector('.body').setAttribute('transform', `rotate(${ang})`);
+      g.querySelector('.cab').setAttribute('transform', `rotate(${ang})`);
+      g.querySelector('.load').setAttribute('transform', `rotate(${ang})`);
+      g.style.opacity = (f.state === 'parked') ? 0.35 : 1;
+    });
+  }
+
+  // ---------------------------------------------------------------- side panel
+  function drawKpis() {
+    const m = twins[`${twinsNs()}:mine`], cr = twins[`${twinsNs()}:crusher`], fl = twins[`${twinsNs()}:flotation`], sub = twins[`${twinsNs()}:substation`], d = twins[`${twinsNs()}:dispatcher`];
+    if (!m) return;
+    const items = [
+      ['Руда добыта', `${fmt(m.f.ore_mined_t / 1000, 1)} кт`], ['Порода', `${fmt(m.f.waste_mined_t / 1000, 1)} кт`],
+      ['Коэфф. вскрыши', `${fmt(m.f.strip_ratio, 2)}`], ['Концентрат', `${fmt(m.f.concentrate_t, 1)} т`],
+      ['Дробилка', cr ? `${fmt(cr.f.throughput)} т/ч` : '—'], ['Питание', cr ? `${fmt(cr.f.feed_grade, 3)} % Cu` : '—'],
+      ['Извлечение', fl ? `${fmt(fl.f.recovery, 1)} %` : '—'], ['Медь в конц.', `${fmt(m.f.copper_in_concentrate_t, 1)} т`],
+      ['Нагрузка', sub ? `${fmt(sub.f.load / 1000, 1)} МВт` : '—'], ['Дизель', sub ? `${fmt(sub.f.diesel_rate)} л/ч` : '—'],
+      ['Цикл самосвала', d ? `${fmt(d.f.avg_cycle_min, 1)} мин` : '—'], ['Ожидание в очередях', d ? `${fmt(d.f.avg_queue_min, 1)} мин` : '—'],
+      ['Самосвалов в работе', `${fmt(m.f.trucks_active)}`], ['Готовность парка', `${fmt(m.f.fleet_availability_pct)} %`],
+      ['CO₂ накоплено', sub ? `${fmt(sub.f.co2_total, 1)} т` : '—'], ['Шихтовка', d ? rs(d.f.blend_mode) : '—'],
+    ];
+    $('#kpis').innerHTML = items.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+    $('#simtime').textContent = `смена: ${fmt(m.f.sim_time_h, 1)} ч`;
+    activeScen = m.f.active_scenarios || 'none';
+    const b = $('#scenbadge');
+    b.textContent = activeScen === 'none' ? 'сценарии: нет' : `сценарии: ${activeScen}`;
+    b.classList.toggle('active', activeScen !== 'none');
+    document.querySelectorAll('.scen button[data-key]').forEach(btn => btn.classList.toggle('on', isOn(btn.dataset.key, btn.dataset.val)));
+  }
+  function isOn(key, val) {
+    if (activeScen === 'none') return false;
+    return activeScen.split(', ').some(s => { const [k, v] = s.split('='); return k === key && (val === undefined || val === '' || String(v) === String(val)); });
+  }
+  const twinsNs = () => (Object.keys(twins)[0] || 'org.openegiz.sarybulak:x').split(':')[0];
+
+  async function send(cmd) {
+    const r = await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) });
+    if (!r.ok) alert('Команда не отправлена: ' + r.status);
+  }
+  function drawScenarios() {
+    const box = $('#scen'); box.innerHTML = '';
+    scenarios.forEach(s => {
+      const btn = document.createElement('button');
+      const key = s.id.startsWith('fleet') ? 'fleet' : s.id.startsWith('cutoff') ? 'cutoff' : s.id;
+      const val = s.cmd.count !== undefined ? s.cmd.count : s.cmd.value !== undefined ? s.cmd.value : '';
+      btn.dataset.key = key; btn.dataset.val = val;
+      btn.innerHTML = `<span class="t">${s.title}</span><span class="e">${s.effect}</span>`;
+      btn.onclick = () => send(btn.classList.contains('on') ? s.undo : s.cmd);
+      box.appendChild(btn);
+    });
+    const reset = document.createElement('button'); reset.className = 'reset';
+    reset.innerHTML = '<span class="t">Сбросить все сценарии</span><span class="e">Вернуть карьер в штатный режим</span>';
+    reset.onclick = () => send({ action: 'reset' });
+    box.appendChild(reset);
+  }
+  function drawEvents(evts) {
+    $('#events').innerHTML = evts.slice().reverse().map(e => `<div><span>${fmt(e.t_h, 1)} ч</span>${e.text}</div>`).join('');
+  }
+
+  // ---------------------------------------------------------------- polling
+  async function poll() {
+    try {
+      const r = await fetch('/api/state', { cache: 'no-store' });
+      const s = await r.json();
+      const first = !Object.keys(twins).length;
+      trucksPrev = {}; Object.keys(trucksNext).forEach(k => trucksPrev[k] = trucksNext[k]);
+      twins = s.twins; byKind = {};
+      for (const [id, t] of Object.entries(twins)) (byKind[t.a.kind] = byKind[t.a.kind] || []).push(id);
+      for (const k in byKind) byKind[k].sort();
+      const mine = twins[`${twinsNs()}:mine`];
+      if (mine) { const c = activeScen.split(', ').find(x => x.startsWith('cutoff=')); cutoff = c ? parseFloat(c.split('=')[1]) : (mine.a.cutoff_grade_pct || 0.25); }
+      trucksNext = {}; (byKind['haul-truck'] || []).forEach(id => trucksNext[id] = { x: twins[id].f.x, y: twins[id].f.y });
+      if (first) { Object.assign(trucksPrev, trucksNext); drawTerrain(); drawScenarios(); $('#ns').textContent = s.namespace; }
+      lastPoll = performance.now();
+      drawRoads(); drawBlocks(); drawFacilities(); drawKpis(); drawEvents(s.events || []);
+      $('#status').textContent = `${Object.keys(twins).length} двойников из Ditto · обновлений: ${s.updates}`;
+    } catch (e) {
+      $('#status').textContent = 'нет связи с платформой: ' + e.message;
+    }
+  }
+  async function loadScenarios() { try { scenarios = await (await fetch('/api/scenarios')).json(); } catch (e) { scenarios = []; } }
+
+  // ---------------------------------------------------------------- zoom and pan
+  const svg = $('#map');
+  const views = { all: [80, 230, 1620, 800], pit: [60, 300, 900, 520], plant: [1000, 220, 760, 500] };
+  let vb = views.all.slice();
+  const setVb = () => svg.setAttribute('viewBox', vb.join(' '));
+  function zoomAt(k, px, py) {
+    const r = svg.getBoundingClientRect();
+    const sx = vb[0] + (px - r.left) / r.width * vb[2], sy = vb[1] + (py - r.top) / r.height * vb[3];
+    const w = Math.max(200, Math.min(2400, vb[2] * k)), h = vb[3] * (w / vb[2]);
+    vb = [sx - (sx - vb[0]) * (w / vb[2]), sy - (sy - vb[1]) * (h / vb[3]), w, h]; setVb();
+  }
+  svg.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.deltaY > 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); }, { passive: false });
+  let drag = null;
+  svg.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY, vb: vb.slice() }; });
+  window.addEventListener('mousemove', (e) => { if (!drag) return; const r = svg.getBoundingClientRect(); vb[0] = drag.vb[0] - (e.clientX - drag.x) / r.width * vb[2]; vb[1] = drag.vb[1] - (e.clientY - drag.y) / r.height * vb[3]; setVb(); });
+  window.addEventListener('mouseup', () => drag = null);
+  $('#z-pit').onclick = () => { vb = views.pit.slice(); setVb(); };
+  $('#z-plant').onclick = () => { vb = views.plant.slice(); setVb(); };
+  $('#z-all').onclick = () => { vb = views.all.slice(); setVb(); };
+  $('#z-in').onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(1 / 1.3, r.left + r.width / 2, r.top + r.height / 2); };
+  $('#z-out').onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(1.3, r.left + r.width / 2, r.top + r.height / 2); };
+
+  function frame(now) { if (Object.keys(twins).length) drawTrucks(now); requestAnimationFrame(frame); }
+  loadScenarios().then(() => { poll(); setInterval(poll, pollPeriod); requestAnimationFrame(frame); });
+})();
+</script>
+</body>
+</html>

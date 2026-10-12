@@ -1,0 +1,570 @@
+{
+ "uid": "sarybulak-fleet",
+ "title": "Sarybulak: транспорт и диспетчеризация",
+ "tags": [
+  "sarybulak",
+  "openegiz"
+ ],
+ "timezone": "browser",
+ "editable": true,
+ "refresh": "5s",
+ "schemaVersion": 39,
+ "version": 1,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 19,
+   "type": "table",
+   "title": "Парк самосвалов: последнее состояние",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 9
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and (r._field == \"value_state_properties_value\" or r._field == \"value_payload_properties_value\" or r._field == \"value_speed_properties_value\" or r._field == \"value_fuel_properties_value\" or r._field == \"value_fuel_rate_properties_value\" or r._field == \"value_trips_total_properties_value\" or r._field == \"value_hours_properties_value\" or r._field == \"value_health_pct_properties_value\" or r._field == \"value_destination_properties_value\" or r._field == \"value_assigned_excavator_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "thingId": "Самосвал",
+       "value_state_properties_value": "Состояние",
+       "value_payload_properties_value": "Груз, т",
+       "value_speed_properties_value": "Скорость, км/ч",
+       "value_fuel_properties_value": "Топливо, л",
+       "value_fuel_rate_properties_value": "Расход, л/ч",
+       "value_trips_total_properties_value": "Рейсов",
+       "value_hours_properties_value": "Наработка, ч",
+       "value_health_pct_properties_value": "Состояние, %",
+       "value_destination_properties_value": "Куда",
+       "value_assigned_excavator_properties_value": "Экскаватор"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": 20,
+   "type": "timeseries",
+   "title": "Скорость самосвалов, км/ч",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 9,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and r._field == \"value_speed_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 21,
+   "type": "timeseries",
+   "title": "Груз в кузове, т",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 9,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and r._field == \"value_payload_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "t",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 22,
+   "type": "timeseries",
+   "title": "Топливо в баке, л",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 17,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and r._field == \"value_fuel_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     },
+     "min": 0
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 23,
+   "type": "timeseries",
+   "title": "Рейсов, нарастающим итогом",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 17,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and r._field == \"value_trips_total_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 24,
+   "type": "timeseries",
+   "title": "Экскаваторы: загрузка, %",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 25,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:excavator-/ and r._field == \"value_utilization_pct_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     },
+     "min": 0,
+     "max": 100
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 25,
+   "type": "timeseries",
+   "title": "Экскаваторы: очередь самосвалов",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 25,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:excavator-/ and r._field == \"value_queue_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 26,
+   "type": "timeseries",
+   "title": "Трафик по дорогам (самосвалов на участке)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 33,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:road-/ and r._field == \"value_trucks_on_road_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 27,
+   "type": "timeseries",
+   "title": "Техническое состояние техники, %",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 33,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:truck-/ and r._field == \"value_health_pct_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:excavator-/ and r._field == \"value_health_pct_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, twin: r.thingId}))\n  |> group(columns: [\"twin\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)",
+     "refId": "B"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 12,
+      "stacking": {
+       "mode": "none"
+      },
+      "spanNulls": true
+     },
+     "min": 0,
+     "max": 100
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 28,
+   "type": "table",
+   "title": "Экскаваторы",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 41,
+    "w": 24,
+    "h": 5
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "from(bucket: \"default\")\n  |> range(start: -5m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.sarybulak:excavator-/ and (r._field == \"value_state_properties_value\" or r._field == \"value_block_properties_value\" or r._field == \"value_face_grade_properties_value\" or r._field == \"value_passes_total_properties_value\" or r._field == \"value_tonnes_loaded_properties_value\" or r._field == \"value_queue_properties_value\" or r._field == \"value_utilization_pct_properties_value\" or r._field == \"value_hours_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "thingId": "Экскаватор",
+       "value_state_properties_value": "Состояние",
+       "value_block_properties_value": "Блок",
+       "value_face_grade_properties_value": "Содержание, % Cu",
+       "value_passes_total_properties_value": "Ковшей",
+       "value_tonnes_loaded_properties_value": "Погружено, т",
+       "value_queue_properties_value": "Очередь",
+       "value_utilization_pct_properties_value": "Загрузка, %",
+       "value_hours_properties_value": "Наработка, ч"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ },
+ "links": [
+  {
+   "title": "Карта карьера",
+   "type": "link",
+   "url": "http://localhost:8095/",
+   "targetBlank": true
+  },
+  {
+   "title": "Обзор",
+   "type": "link",
+   "url": "/d/sarybulak-overview"
+  },
+  {
+   "title": "Парк",
+   "type": "link",
+   "url": "/d/sarybulak-fleet"
+  },
+  {
+   "title": "Фабрика и энергия",
+   "type": "link",
+   "url": "/d/sarybulak-plant-energy"
+  },
+  {
+   "title": "Карта в Grafana",
+   "type": "link",
+   "url": "/d/sarybulak-map"
+  }
+ ]
+}

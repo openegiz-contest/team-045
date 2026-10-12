@@ -1,0 +1,63 @@
+# Sarybulak digital mine: an overlay on deploy/compose/docker-compose.yml.
+# Started by `make mine` from the repository root. Paths are relative to
+# deploy/compose (the first compose file), like examples/mine/compose.yml.
+
+services:
+  # Creates or updates the 60+ twins of the mine in Ditto, then exits.
+  mine-setup:
+    build: ../../team
+    image: openegiz/sarybulak:local
+    restart: "no"
+    command: ["python", "-m", "mine.setup_twins"]
+    environment:
+      DITTO_URL: http://ditto-nginx:80
+      DITTO_PASSWORD: ${DITTO_PASSWORD}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # Simulator + dispatcher + ore control + plant + energy + reliability.
+  # Publishes Ditto protocol messages to MQTT; listens for what-if commands.
+  mine-sim:
+    image: openegiz/sarybulak:local
+    pull_policy: never
+    restart: unless-stopped
+    mem_limit: 192m
+    command: ["python", "-m", "mine.run_sim"]
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      SIM_SPEEDUP: ${SIM_SPEEDUP:-10}
+      SIM_INTERVAL: ${SIM_INTERVAL:-2}
+    depends_on:
+      mine-setup:
+        condition: service_completed_successfully
+
+  # Mine map (2D, live from Ditto) and the what-if scenario panel.
+  # Reads twin state from the platform: Ditto search API on start, Ditto
+  # change events from MQTT afterwards. Commands go to the simulator by MQTT.
+  mine-control:
+    image: openegiz/sarybulak:local
+    pull_policy: never
+    restart: unless-stopped
+    mem_limit: 192m
+    command: ["python", "-m", "mine.control"]
+    environment:
+      DITTO_URL: http://ditto-nginx:80
+      DITTO_PASSWORD: ${DITTO_PASSWORD}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      PORT: "8095"
+    ports:
+      - "${OPENEGIZ_BIND:-127.0.0.1}:${MINE_PORT:-8095}:8095"
+    depends_on:
+      mine-setup:
+        condition: service_completed_successfully
+
+  grafana:
+    environment:
+      # the "Mine map" dashboard embeds the live map page in an iframe
+      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
+    volumes:
+      - ../../team/grafana/provisioning.yaml:/etc/grafana/provisioning/dashboards/sarybulak.yaml:ro
+      - ../../team/grafana/dashboards:/var/lib/grafana/sarybulak-dashboards:ro

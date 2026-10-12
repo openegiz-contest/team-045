@@ -1,0 +1,83 @@
+{
+ "uid": "sarybulak-map",
+ "title": "Sarybulak: карта карьера",
+ "tags": [
+  "sarybulak",
+  "openegiz"
+ ],
+ "timezone": "browser",
+ "editable": true,
+ "refresh": "",
+ "schemaVersion": 39,
+ "version": 1,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 43,
+   "type": "text",
+   "title": "Карта карьера (живая, из Ditto)",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 30
+   },
+   "options": {
+    "mode": "html",
+    "content": "<iframe src=\"http://localhost:8095/\" style=\"width:100%;height:100%;border:0;background:#0f1419\" title=\"Sarybulak mine map\"></iframe>"
+   }
+  },
+  {
+   "id": 44,
+   "type": "text",
+   "title": "Как читать карту",
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 24,
+    "h": 4
+   },
+   "options": {
+    "mode": "markdown",
+    "content": "Карта строится из атрибутов двойников (геометрия уступов, блоков, дорог, объектов) и их features (состояния). Самосвалы движутся по координатам из Ditto; цвет блока — содержание меди, штриховка — бурение и заряжание, белая рамка — отрабатываемый блок. Кнопки справа запускают сценарии «что если» и отменяют их. Если iframe не отображается, откройте карту напрямую: http://localhost:8095/"
+   }
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ },
+ "links": [
+  {
+   "title": "Карта карьера",
+   "type": "link",
+   "url": "http://localhost:8095/",
+   "targetBlank": true
+  },
+  {
+   "title": "Обзор",
+   "type": "link",
+   "url": "/d/sarybulak-overview"
+  },
+  {
+   "title": "Парк",
+   "type": "link",
+   "url": "/d/sarybulak-fleet"
+  },
+  {
+   "title": "Фабрика и энергия",
+   "type": "link",
+   "url": "/d/sarybulak-plant-energy"
+  },
+  {
+   "title": "Карта в Grafana",
+   "type": "link",
+   "url": "/d/sarybulak-map"
+  }
+ ]
+}

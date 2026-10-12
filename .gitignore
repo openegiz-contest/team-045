@@ -28,3 +28,10 @@ build/WebGL Build.loader.js
 build/WebGL Build.framework.js
 build/WebGL Build.data
 build/WebGL Build.wasm
+
+# Set by `make mine`: compose commands then include the Sarybulak overlay
+deploy/compose/.sarybulak
+# local tooling
+.claude/
+__pycache__/
+*.pyc
