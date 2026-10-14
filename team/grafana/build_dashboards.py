@@ -13,6 +13,7 @@
 
 import json
 import os
+import time
 
 NS = "org.openegiz.zhezkazgan"
 NS_RE = NS.replace(".", "\\.")
@@ -100,7 +101,8 @@ def text(title, content, x=0, y=0, w=24, h=4, mode="markdown"):
 
 def dashboard(uid, title, panels, refresh="5s", rng="30m"):
     return {"uid": uid, "title": title, "tags": ["vzhr", "openegiz"], "timezone": "browser", "editable": True,
-            "refresh": refresh, "schemaVersion": 39, "version": 1, "time": {"from": f"now-{rng}", "to": "now"},
+            # version растёт при каждой сборке: иначе Grafana с allowUiUpdates не перечитывает изменённый файл
+            "refresh": refresh, "schemaVersion": 39, "version": int(time.time()), "time": {"from": f"now-{rng}", "to": "now"},
             "panels": panels, "templating": {"list": []}, "annotations": {"list": []}, "links": [
                 {"title": "План горизонта", "type": "link", "url": "http://localhost:8095/", "targetBlank": True},
                 {"title": "Обзор смены", "type": "link", "url": "/d/vzhr-overview"},
