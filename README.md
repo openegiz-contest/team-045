@@ -40,7 +40,7 @@ make mine-check
 | Что | Где |
 |---|---|
 | **План горизонта, наряд смены, сценарии «что если»** | http://localhost:8095/ |
-| Дашборды Grafana, папка **ВЖР**: обзор смены, воздух и газы, горное давление и целики, наряд и камеры, план | http://localhost:3000/dashboards?query=ВЖР — логин `admin`, пароль печатает `make mine` (хранится в `deploy/compose/.env`) |
+| Дашборды Grafana, папка **ВЖР**: обзор смены, воздух и газы, горное давление и целики, наряд и камеры, план | http://localhost:3000/d/vzhr-overview (папка «ВЖР» в разделе Dashboards) — логин `admin`, пароль печатает `make mine` (хранится в `deploy/compose/.env`) |
 | Двойники и их иерархия | Grafana → приложение **OpenEgiz** → **Twins**, пространство имён `org.openegiz.zhezkazgan` |
 | Ditto API | http://localhost:8080/api/2/search/things?namespaces=org.openegiz.zhezkazgan — логин `ditto`, пароль из `deploy/compose/.env` |
 
