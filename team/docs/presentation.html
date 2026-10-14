@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>ВЖР: цифровой двойник горизонта для горного мастера</title>
+<style>
+  @page { size: 338mm 190mm; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0f1419; color: #e6edf3; font: 15px/1.38 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .slide { width: 338mm; height: 190mm; padding: 14mm 16mm 12mm; page-break-after: always; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  .slide:last-child { page-break-after: auto; }
+  h1 { font-size: 34px; margin: 0 0 6px; line-height: 1.15; }
+  h2 { font-size: 26px; margin: 0 0 10px; color: #e6edf3; }
+  h3 { font-size: 17px; margin: 10px 0 4px; color: #38bdf8; }
+  .sub { color: #8b98a8; font-size: 17px; }
+  .foot { position: absolute; bottom: 7mm; left: 16mm; right: 16mm; display: flex; justify-content: space-between; color: #5f7187; font-size: 11px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; flex: 1; min-height: 0; }
+  .cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; flex: 1; }
+  .box { background: #161c24; border: 1px solid #2a3441; border-radius: 8px; padding: 12px 14px; }
+  .box b { color: #fcd34d; }
+  ul { margin: 4px 0 8px 18px; padding: 0; } li { margin: 3px 0; }
+  img.shot { width: 100%; border-radius: 6px; border: 1px solid #2a3441; display: block; }
+  .shotwrap { flex: 1; min-height: 0; display: flex; align-items: center; }
+  .shotwrap img { max-height: 100%; width: auto; max-width: 100%; margin: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  td, th { border-bottom: 1px solid #2a3441; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { color: #8b98a8; font-weight: 500; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 12px; border: 1px solid #2a3441; background: #1d2530; margin-right: 4px; }
+  .ok { color: #22c55e; } .warn { color: #f59e0b; } .bad { color: #ef4444; }
+  code { background: #1d2530; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .big { font-size: 20px; }
+  .quote { font-size: 22px; color: #fcd34d; border-left: 4px solid #f59e0b; padding-left: 14px; margin: 14px 0; }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <div style="flex:1; display:flex; flex-direction:column; justify-content:center">
+    <div class="sub">Конкурс «Цифровой рудник на OpenEgiz» · команда ML (leylagxx)</div>
+    <h1 style="font-size:46px; margin-top:10px">Восточно-Жезказганский рудник:<br>цифровой двойник горизонта для горного мастера</h1>
+    <div class="sub big" style="margin-top:14px">В какие камеры в эту смену можно ставить людей: хватает ли воздуха и держат ли целики.</div>
+    <div style="margin-top:30px">
+      <span class="tag">OpenEgiz v1.0.4</span><span class="tag">Eclipse Ditto · 166 двойников</span><span class="tag">MQTT → Ditto → InfluxDB → Grafana</span><span class="tag">план горизонта :8095</span><span class="tag">10 сценариев «что если»</span>
+    </div>
+  </div>
+  <div class="foot"><span>Стенд: <code>make mine</code> · проверка: <code>make mine-check</code></span><span>1</span></div>
+</section>
+
+<section class="slide">
+  <h2>Замысел</h2>
+  <div class="cols">
+    <div>
+      <div class="box">
+        <b>Предприятие.</b> Восточно-Жезказганский рудник (Казахмыс, г. Сатпаев): подземный медный рудник, камерно-столбовая система, медистые песчаники. Двойник — один добычной горизонт: панели с камерами и целиками, вентиляционная сеть, люди и техника, рудоспуски и подъём.
+      </div>
+      <div class="box" style="margin-top:10px">
+        <b>Пользователь.</b> Горный мастер при выдаче наряда на смену; рядом — диспетчер и инженер по вентиляции.
+      </div>
+      <div class="box" style="margin-top:10px">
+        <b>Решение.</b> В какие камеры ставить звенья и ПДМ, а какие закрыть. По каждой камере двойник отвечает: хватает ли воздуха (люди, дизель, после взрыва) и держат ли целики и кровля (горное давление, конвергенция, сейсмика). Если нет — наряд запрещён, и двойник показывает, куда перевести звено.
+      </div>
+    </div>
+    <div>
+      <div class="box">
+        <b>Почему именно это.</b>
+        <div class="quote">«Главное на руднике — обрушения и воздух».<br><span style="font-size:14px;color:#8b98a8">— горнорабочий ВЖР, мой папа</span></div>
+        Я из Сатпаева. Решение горного мастера каждую смену определяет, попадут ли горнорабочие в загазованную или неустойчивую камеру. Поэтому двойник — для него и про эти два риска, а не про тонны и самосвалы.
+      </div>
+      <div class="box" style="margin-top:10px">
+        <b>Реальный объект.</b> Структура ВЖР (шахты 57, 73/75, 55, Анненская; проект 5,5 млн т/год), параметры камерно-столбовой системы Жезказгана, нормы воздуха и газов РК, прочность целиков по Хедли–Гранту, сейсмика по датасету seismic-bumps (UCI, CC BY 4.0). Схема горизонта и парк техники — условные, со ссылками на источники.
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>SUBMISSION.md → Concept</span><span>2</span></div>
+</section>
+
+<section class="slide">
+  <h2>Что построено на OpenEgiz: 166 двойников в Ditto, иерархия через <code>_parents</code></h2>
+  <div class="cols3">
+    <div class="box">
+      <h3>Воздух</h3>
+      <ul>
+        <li><b>fan-main</b> — ВГП ВОД-30: обороты, подача, депрессия</li>
+        <li><b>18 выработок aw-*</b> — сопротивление Аткинсона, расход, скорость, направление, CO, NO2, t, двери и регуляторы, завалы</li>
+        <li><b>16 узлов</b> — стволы (свежая/исходящая), сопряжения, дробилка</li>
+        <li><b>5 датчиков АГК</b> — CO, NO2, O2, CO2, t, скорость, сигнал</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Горное давление и камеры</h3>
+      <ul>
+        <li><b>3 панели</b> — подача, люди, дизель, бюджет воздуха, сейсмика за смену, эвакуация</li>
+        <li><b>54 камеры k*-**</b> — стадия цикла, слой, воздух факт/норма, газы, <span class="ok">вердикт наряда</span> и причина</li>
+        <li><b>54 целика c*-**</b> — высота, прочность, напряжение, SF, конвергенция, статус</li>
+        <li><b>3 рудоспуска</b>, дробилка, скиповой подъём</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Люди, техника, наряд</h3>
+      <ul>
+        <li><b>4 звена</b> — камера, работа, состояние, координаты, экспозиция CO</li>
+        <li><b>3 ПДМ Sandvik LH517i, 2 СБУ DD421</b> — камера, кВт, тонны, наработка</li>
+        <li><b>shift-plan</b> — наряд смены, автонаряд, последнее изменение мастера, отклонённые наряды</li>
+        <li><b>east-mine</b> — смена, людей под землёй, камер разрешено/ограничено/запрещено, сигнал АГК, сценарии</li>
+      </ul>
+    </div>
+  </div>
+  <div class="box" style="margin-top:12px">
+    <b>Поток данных.</b> симулятор → MQTT <code>telemetry/&lt;twin&gt;</code> (Ditto protocol) → Ditto → MQTT-события → Telegraf → InfluxDB → Grafana.
+    План горизонта читает двойники из Ditto (search API + события), команды мастера и сценарии уходят через MQTT в симулятор. Ядро платформы не изменено: overlay <code>team/compose.yml</code>, цели <code>make mine</code>, <code>mine-check</code>.
+  </div>
+  <div class="foot"><span>team/mine/model.py · team/mine/config.py (каждое число с источником)</span><span>3</span></div>
+</section>
+
+<section class="slide">
+  <h2>План горизонта: всё из двойников, живое</h2>
+  <div class="shotwrap"><img class="shot" src="img/plan.png" alt="План горизонта"></div>
+  <div class="sub" style="margin-top:8px">Струи по выработкам (направление, скорость, чистота), ВГП, датчики АГК, панели с камерами (цвет = вердикт наряда) и целиками (цвет и число = SF), рудоспуски, дробилка, подъём, звенья и техника. Справа: смена, наряд мастера, запрещённые камеры с причинами, сценарии, журнал. http://localhost:8095/</div>
+  <div class="foot"><span>Grafana → «ВЖР: план горизонта» встраивает ту же страницу</span><span>4</span></div>
+</section>
+
+<section class="slide">
+  <h2>Воздух: вентиляционная сеть и нормы РК</h2>
+  <div class="cols">
+    <div>
+      <div class="box">
+        <ul>
+          <li>Сеть из 18 выработок и 3 стволов; R = α·P·L/A³ (Аткинсон); ВГП p = p₀(1 − (Q/Qmax)²); распределение — метод Харди–Кросса (остовное дерево по наименьшим R, двери и завалы в хордах).</li>
+          <li>Газы и тепло переносятся по струе: смешение в узлах по расходу; панели — источники (дизель, взрывные газы).</li>
+          <li>Нормы: 6 м³/мин на человека, 6,8 м³/мин на кВт дизеля; ПДК CO 0,0016 %, NO2 0,00026 %; t ≤ 26 °C; скорость 0,25–8 м/с; вход после взрыва не ранее 30 мин и по ПДК.</li>
+          <li>Камера получает долю струи панели; <b>вердикт по воздуху</b>: хватает на звено? на ПДМ (352 кВт ⇒ 2 424 м³/мин)? Нет — «ограничено: без дизеля» или «запрещено».</li>
+        </ul>
+      </div>
+      <div class="box" style="margin-top:10px"><b>Что видно:</b> подписи расходов и скоростей на плане, цвет струи, датчики АГК; дашборд «воздух и газы» (ВГП, CO/NO2 по датчикам и камерам, расходы, скорости, температура).</div>
+    </div>
+    <div class="shotwrap"><img class="shot" src="img/grafana-air.png" alt="Дашборд воздух"></div>
+  </div>
+  <div class="foot"><span>Техрегламент РК P090002207; методика расчёта расхода воздуха для рудников</span><span>5</span></div>
+</section>
+
+<section class="slide">
+  <h2>Обрушения: целики, конвергенция, сейсмика</h2>
+  <div class="cols">
+    <div class="shotwrap"><img class="shot" src="img/plan-pillars.png" alt="Выемка целиков"></div>
+    <div>
+      <div class="box">
+        <ul>
+          <li><b>Прочность целика</b> — Хедли–Грант S = K·w^0,5/h^0,75 (K = 0,7·UCS); <b>напряжение</b> — площади влияния σ = ρgH/(1−e), извлечение растёт с отработкой соседей и выемкой целиков; высота целика растёт со слоями.</li>
+          <li>SF ≥ 1,5 устойчив · 1,3–1,5 наблюдение (без новых взрывов рядом) · &lt; 1,3 критический (камеры рядом закрыты). Конвергенция ≥ 2,5 мм/сут — закрытие.</li>
+          <li><b>Сейсмика</b> по seismic-bumps: 0,73–1,10 толчка за смену, опасный толчок в 5–10 % смен; толчок ≥ 50 кДж — вывод людей из панели на 2 ч и повреждение целиков.</li>
+        </ul>
+      </div>
+      <div class="box" style="margin-top:10px">На снимке: сценарий «выемка целиков 1-23 и 1-24» — соседние целики стали <span class="bad">критическими</span>, камеры 1-23…1-25 <span class="bad">запрещены</span> с причиной «целик 1-13 критический (SF 1,26)», звенья выведены.</div>
+    </div>
+  </div>
+  <div class="foot"><span>Hedley &amp; Grant (1972); seismic-bumps, UCI (CC BY 4.0)</span><span>6</span></div>
+</section>
+
+<section class="slide">
+  <h2>Наряд смены: решение мастера, проверенное двойником</h2>
+  <div class="cols">
+    <div>
+      <div class="box">
+        <ul>
+          <li>Каждые 8 ч пересменка: взрывы заряженных камер, проветривание, сейсмика за смену, новый наряд.</li>
+          <li><b>Автонаряд</b> расставляет звенья, ПДМ и СБУ по камерам с допустимым вердиктом: приоритет незавершённому циклу, преемственность звена, ПДМ только в бюджете воздуха панели.</li>
+          <li><b>Ручной наряд</b>: мастер выбирает звену камеру из списка с вердиктами и нажимает «→». Двойник принимает наряд только в разрешённую/ограниченную камеру; попытку поставить людей в запрещённую отклоняет с причиной.</li>
+          <li>Если камера становится запрещённой во время смены — звено выводится, причина в журнале.</li>
+        </ul>
+      </div>
+      <div class="box" style="margin-top:10px">
+        <b>Цикл камеры</b> (слой 4,5 м, 2 340 т): бурение 4 ч → заряжание 1,5 ч → взрыв в пересменку → проветривание → оборка 1 ч → крепление 2 ч → выпуск ПДМ в рудоспуск → дробилка → подъём.
+      </div>
+    </div>
+    <div class="shotwrap"><img class="shot" src="img/grafana-plan.png" alt="Дашборд наряд"></div>
+  </div>
+  <div class="foot"><span>План → «Наряд смены»; двойник shift-plan; дашборд «наряд, камеры и техника»</span><span>7</span></div>
+</section>
+
+<section class="slide">
+  <h2>Сценарии «что если» — кнопки на стенде, последствия по двойникам, отмена</h2>
+  <div class="cols">
+    <div class="shotwrap"><img class="shot" src="img/plan-fan50.png" alt="ВГП 50 %"></div>
+    <div>
+      <table>
+        <tr><th>Сценарий</th><th>Что меняется</th></tr>
+        <tr><td>ВГП 50 % / остановка</td><td>воздуха вдвое меньше / нет струи: ПДМ без допуска, камеры ограничены/запрещены, люди к стволу</td></tr>
+        <tr><td>Дверь в сбойке 3 открыта</td><td>короткое замыкание струи мимо П-2, П-3</td></tr>
+        <tr><td>Регулятор П-3 прикрыт</td><td>воздух перераспределён: в П-2 допуск на ПДМ</td></tr>
+        <tr><td>Обрушение в штреке 1–2</td><td>нет пути к стволу: П-2, П-3 запрещены</td></tr>
+        <tr><td>Самосвал 429 кВт в П-1</td><td>+2 900 м³/мин потребности, CO/NO2 растут</td></tr>
+        <tr><td>Толчок 150 кДж в П-1</td><td>эвакуация панели на 2 ч, целики повреждены</td></tr>
+        <tr><td>Выемка целика 1-24</td><td>SF соседей падает, камеры закрываются</td></tr>
+        <tr><td>Отказ ВМП в 1-26</td><td>камера запрещена, звено выведено</td></tr>
+        <tr><td>Наряд мастера</td><td>назначение звена; недопустимое — отклонено</td></tr>
+      </table>
+      <div class="sub" style="margin-top:8px">Повторное нажатие отменяет сценарий; «Сбросить все сценарии» возвращает штатный режим. Те же команды: <code>POST /api/command</code>.</div>
+    </div>
+  </div>
+  <div class="foot"><span>На снимке: ВГП 50 % — камеры 1-23…1-25 «ограничено: без дизельной техники», ВГП 121 м³/с</span><span>8</span></div>
+</section>
+
+<section class="slide">
+  <h2>Данные и допущения</h2>
+  <table>
+    <tr><th>Параметр</th><th>Значение</th><th>Источник</th></tr>
+    <tr><td>Рудник</td><td>ВЖР: шахты 57, 73/75, 55, Анненская; проект 5 500 тыс. т/год; шахта 73/75 — 2 млн т/год; горизонт 300 м</td><td>программа ПЭК ВЖР; kazakhmys.kz; inform.kz; глубина горизонта — допущение</td></tr>
+    <tr><td>Система разработки</td><td>сетка целиков 20×20 м, пролёты ≤ 15,5 м, слои 4–5 м; камеры 10×20 м, целики 10×10 м</td><td>отчёт о практике, Южно-Жезказганский рудник; mining-enc.ru</td></tr>
+    <tr><td>Прочность целиков</td><td>Хедли–Грант, K = 0,7·UCS (UCS 110 МПа); σ = ρgH/(1−e); пороги SF 1,3 / 1,5</td><td>Hedley &amp; Grant (1972); SAIMM (K = 60–70 % UCS)</td></tr>
+    <tr><td>Сейсмичность</td><td>0,73 / 1,10 толчка за смену, опасный толчок 4,9 % / 9,6 % смен, p90 8 700 Дж</td><td>seismic-bumps, UCI, CC BY 4.0 — копия в репозитории</td></tr>
+    <tr><td>Нормы воздуха</td><td>6 м³/мин·чел, 6,8 м³/мин·кВт; CO 0,0016 %, NO2 0,00026 %, ≤ 26 °C, 0,25–8 м/с, ≥ 30 мин после взрыва</td><td>Техрегламент РК P090002207; методика расчёта расхода воздуха; NO2 — ФНП 505 (допущение)</td></tr>
+    <tr><td>ВГП, техника</td><td>ВОД-30 260 м³/с / 2 200 Па; ПДМ LH517i 352 кВт; CAT AD45B 429 кВт; СБУ DD421</td><td>каталоги ВОД, Sandvik, Caterpillar; CAT AD45B на Жезказгане — inform.kz</td></tr>
+    <tr><td>Выбросы, взрыв, цикл</td><td>6 г/кВт·ч CO, 2 г/кВт·ч NO2; 1 300 кг ВВ, 40 л CO/кг; звено 5 чел; хронометраж стадий</td><td>допущения; «в камере 4–6 человек» — со слов работника рудника</td></tr>
+  </table>
+  <div class="sub" style="margin-top:10px">Телеметрия синтетическая, порождается симулятором; датасеты при запуске не скачиваются; персональных данных нет.</div>
+  <div class="foot"><span>SUBMISSION.md → Data and Assumptions; team/mine/config.py</span><span>9</span></div>
+</section>
+
+<section class="slide">
+  <h2>Как увидеть на стенде за 5 минут</h2>
+  <div class="cols">
+    <div class="box">
+      <ol style="margin:0 0 0 18px; padding:0; font-size:16px">
+        <li><code>sudo apt install -y make &amp;&amp; make mine</code> — платформа, двойники, симулятор, план, дашборды. <code>make mine-check</code> — сквозная проверка.</li>
+        <li>http://localhost:8095/ — план горизонта. Камеры: <span class="ok">зелёные</span> наряд разрешён, <span class="warn">жёлтые</span> ограничено, <span class="bad">красные</span> запрещено; причины справа и в подсказке.</li>
+        <li>«Наряд смены»: выберите звену камеру, нажмите «→». Попробуйте запрещённую — двойник отклонит с причиной.</li>
+        <li>Нажмите «ВГП: снижение подачи до 50 %», затем «Выемка целика 1-24» — смотрите струи, вердикты, звенья; отмените повторным нажатием или «Сбросить».</li>
+        <li>Grafana (admin, пароль печатает <code>make mine</code>; просмотр открыт и без входа) → папка «ВЖР»: обзор смены, воздух и газы, горное давление и целики, наряд, план.</li>
+        <li>OpenEgiz → Twins: иерархия <code>org.openegiz.zhezkazgan</code>.</li>
+      </ol>
+    </div>
+    <div>
+      <div class="box">
+        <b>Что работает.</b> 166 двойников, телеметрия, история, 5 дашбордов, план, наряд с отклонением недопустимого, 10 сценариев с отменой; симулятор прогнан 96 ч модельного времени.
+      </div>
+      <div class="box" style="margin-top:10px">
+        <b>Ограничения.</b> Сеть стационарная, газы без инерции; сейсмика по статистике чужого рудника; целики — эмпирическая формула; 54 камеры отрабатываются за ~400 ч модельного времени; нет пыли, воды, электроснабжения.
+      </div>
+      <div class="box" style="margin-top:10px">
+        <b>Что дальше.</b> Подключить реальные датчики АГК и конвергенции ВЖР вместо симулятора: формат — те же команды Ditto в MQTT. Тогда наряд мастера будет проверяться по фактическим воздуху и давлению.
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Команда ML · leylagxx · OpenEgiz v1.0.4</span><span>10</span></div>
+</section>
+
+</body>
+</html>
