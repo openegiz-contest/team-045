@@ -388,6 +388,7 @@
       }
      },
      "min": 0,
+     "max": 0.004,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -452,6 +453,7 @@
       }
      },
      "min": 0,
+     "max": 0.0006,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -691,6 +693,7 @@
       }
      },
      "min": 0,
+     "max": 0.004,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -719,7 +722,7 @@
    "gridPos": {
     "x": 0,
     "y": 28,
-    "w": 24,
+    "w": 16,
     "h": 6
    },
    "targets": [
@@ -728,7 +731,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:agk-/ and (r._field == \"value_co_properties_value\" or r._field == \"value_no2_properties_value\" or r._field == \"value_o2_properties_value\" or r._field == \"value_co2_properties_value\" or r._field == \"value_temp_properties_value\" or r._field == \"value_velocity_properties_value\" or r._field == \"value_alarm_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:agk-/ and (r._field == \"value_co_properties_value\" or r._field == \"value_no2_properties_value\" or r._field == \"value_o2_properties_value\" or r._field == \"value_co2_properties_value\" or r._field == \"value_temp_properties_value\" or r._field == \"value_velocity_properties_value\"))\n  |> filter(fn: (r) => types.isNumeric(v: r._value))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
      "refId": "A"
     }
    ],
@@ -751,7 +754,50 @@
        "value_o2_properties_value": "O2, %",
        "value_co2_properties_value": "CO2, %",
        "value_temp_properties_value": "t, °C",
-       "value_velocity_properties_value": "v, м/с",
+       "value_velocity_properties_value": "v, м/с"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": 30,
+   "type": "table",
+   "title": "Датчики АГК: сигналы",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 28,
+    "w": 8,
+    "h": 6
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:agk-/ and (r._field == \"value_alarm_properties_value\"))\n  |> filter(fn: (r) => (types.isType(v: r._value, type: \"string\") or types.isType(v: r._value, type: \"bool\")))\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "thingId": "Датчик",
        "value_alarm_properties_value": "Сигнал"
       }
      }

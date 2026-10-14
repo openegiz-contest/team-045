@@ -16,7 +16,7 @@
  },
  "panels": [
   {
-   "id": 30,
+   "id": 31,
    "type": "timeseries",
    "title": "Запас прочности целиков панели П-1 (SF; 1,3 и 1,5)",
    "datasource": {
@@ -84,7 +84,7 @@
    }
   },
   {
-   "id": 31,
+   "id": 32,
    "type": "timeseries",
    "title": "Запас прочности целиков панели П-2",
    "datasource": {
@@ -152,7 +152,7 @@
    }
   },
   {
-   "id": 32,
+   "id": 33,
    "type": "timeseries",
    "title": "Запас прочности целиков панели П-3",
    "datasource": {
@@ -220,7 +220,7 @@
    }
   },
   {
-   "id": 33,
+   "id": 34,
    "type": "timeseries",
    "title": "Конвергенция, мм/сут (наблюдение 1,0; закрытие 2,5)",
    "datasource": {
@@ -288,7 +288,7 @@
    }
   },
   {
-   "id": 34,
+   "id": 35,
    "type": "timeseries",
    "title": "Сейсмика по панелям: толчков за смену и максимальная энергия, Дж",
    "datasource": {
@@ -344,7 +344,7 @@
    }
   },
   {
-   "id": 35,
+   "id": 36,
    "type": "timeseries",
    "title": "Напряжение и прочность целиков П-1, МПа",
    "datasource": {
@@ -400,7 +400,7 @@
    }
   },
   {
-   "id": 36,
+   "id": 37,
    "type": "timeseries",
    "title": "Вынуто слоёв по панелям",
    "datasource": {
@@ -448,7 +448,7 @@
    }
   },
   {
-   "id": 37,
+   "id": 38,
    "type": "table",
    "title": "Целики: последнее состояние",
    "datasource": {
@@ -458,7 +458,7 @@
    "gridPos": {
     "x": 0,
     "y": 25,
-    "w": 24,
+    "w": 16,
     "h": 12
    },
    "targets": [
@@ -467,7 +467,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:c[1-3]-/ and (r._field == \"value_height_properties_value\" or r._field == \"value_strength_properties_value\" or r._field == \"value_stress_properties_value\" or r._field == \"value_sf_properties_value\" or r._field == \"value_convergence_properties_value\" or r._field == \"value_status_properties_value\" or r._field == \"value_extracted_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:c[1-3]-/ and (r._field == \"value_height_properties_value\" or r._field == \"value_strength_properties_value\" or r._field == \"value_stress_properties_value\" or r._field == \"value_sf_properties_value\" or r._field == \"value_convergence_properties_value\"))\n  |> filter(fn: (r) => types.isNumeric(v: r._value))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
      "refId": "A"
     }
    ],
@@ -489,7 +489,50 @@
        "value_strength_properties_value": "Прочность, МПа",
        "value_stress_properties_value": "Напряжение, МПа",
        "value_sf_properties_value": "SF",
-       "value_convergence_properties_value": "Конвергенция, мм/сут",
+       "value_convergence_properties_value": "Конвергенция, мм/сут"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": 39,
+   "type": "table",
+   "title": "Целики: статус",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 25,
+    "w": 8,
+    "h": 12
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:c[1-3]-/ and (r._field == \"value_status_properties_value\" or r._field == \"value_extracted_properties_value\"))\n  |> filter(fn: (r) => (types.isType(v: r._value, type: \"string\") or types.isType(v: r._value, type: \"bool\")))\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "thingId": "Целик",
        "value_status_properties_value": "Статус",
        "value_extracted_properties_value": "Извлечён"
       }

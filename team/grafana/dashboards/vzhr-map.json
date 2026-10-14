@@ -16,7 +16,7 @@
  },
  "panels": [
   {
-   "id": 43,
+   "id": 46,
    "type": "text",
    "title": "План горизонта (живой, из Ditto)",
    "gridPos": {
@@ -31,7 +31,7 @@
    }
   },
   {
-   "id": 44,
+   "id": 47,
    "type": "text",
    "title": "Как читать план",
    "gridPos": {

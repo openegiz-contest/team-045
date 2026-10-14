@@ -44,7 +44,7 @@ def main():
     speedup = float(os.environ.get("SIM_SPEEDUP", "20"))       # модельных секунд на реальную секунду
     seed = int(os.environ.get("SIM_SEED", "42"))
     warmup_h = float(os.environ.get("SIM_WARMUP_H", "2.0"))    # стенд начинается посреди смены
-    full_every = float(os.environ.get("SIM_FULL_PUBLISH_S", "60"))
+    full_every = float(os.environ.get("SIM_FULL_PUBLISH_S", "20"))   # полный снимок: после повторного setup_twins Ditto догоняет за 20 с
 
     mine = Mine(seed)
     mine.run(warmup_h * 3600, dt=10.0)

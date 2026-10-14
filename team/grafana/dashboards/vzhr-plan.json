@@ -16,7 +16,7 @@
  },
  "panels": [
   {
-   "id": 38,
+   "id": 40,
    "type": "table",
    "title": "Наряд: звенья",
    "datasource": {
@@ -35,7 +35,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:crew-/ and (r._field == \"value_chamber_properties_value\" or r._field == \"value_task_properties_value\" or r._field == \"value_state_properties_value\" or r._field == \"value_people_properties_value\" or r._field == \"value_exposure_co_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:crew-/ and (r._field == \"value_chamber_properties_value\" or r._field == \"value_task_properties_value\" or r._field == \"value_state_properties_value\"))\n  |> filter(fn: (r) => (types.isType(v: r._value, type: \"string\") or types.isType(v: r._value, type: \"bool\")))\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
      "refId": "A"
     }
    ],
@@ -55,16 +55,14 @@
        "thingId": "Звено",
        "value_chamber_properties_value": "Камера",
        "value_task_properties_value": "Работа",
-       "value_state_properties_value": "Состояние",
-       "value_people_properties_value": "Чел.",
-       "value_exposure_co_properties_value": "Экспозиция CO, %·ч"
+       "value_state_properties_value": "Состояние"
       }
      }
     }
    ]
   },
   {
-   "id": 39,
+   "id": 41,
    "type": "table",
    "title": "Техника",
    "datasource": {
@@ -83,7 +81,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:(pdm|sbu)-/ and (r._field == \"value_chamber_properties_value\" or r._field == \"value_state_properties_value\" or r._field == \"value_kw_running_properties_value\" or r._field == \"value_tonnes_shift_properties_value\" or r._field == \"value_hours_properties_value\" or r._field == \"value_rounds_total_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:(pdm|sbu)-/ and (r._field == \"value_chamber_properties_value\" or r._field == \"value_state_properties_value\"))\n  |> filter(fn: (r) => (types.isType(v: r._value, type: \"string\") or types.isType(v: r._value, type: \"bool\")))\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
      "refId": "A"
     }
    ],
@@ -102,18 +100,14 @@
       "renameByName": {
        "thingId": "Машина",
        "value_chamber_properties_value": "Камера",
-       "value_state_properties_value": "Состояние",
-       "value_kw_running_properties_value": "кВт",
-       "value_tonnes_shift_properties_value": "т за смену",
-       "value_hours_properties_value": "Наработка, ч",
-       "value_rounds_total_properties_value": "Заходок"
+       "value_state_properties_value": "Состояние"
       }
      }
     }
    ]
   },
   {
-   "id": 40,
+   "id": 42,
    "type": "table",
    "title": "Камеры: вердикт наряда",
    "datasource": {
@@ -124,7 +118,7 @@
     "x": 0,
     "y": 7,
     "w": 24,
-    "h": 16
+    "h": 14
    },
    "targets": [
     {
@@ -132,7 +126,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:k[1-3]-/ and (r._field == \"value_state_properties_value\" or r._field == \"value_layer_properties_value\" or r._field == \"value_verdict_properties_value\" or r._field == \"value_reason_properties_value\" or r._field == \"value_crew_properties_value\" or r._field == \"value_people_properties_value\" or r._field == \"value_diesel_kw_properties_value\" or r._field == \"value_air_properties_value\" or r._field == \"value_air_required_properties_value\" or r._field == \"value_co_properties_value\" or r._field == \"value_temp_properties_value\"))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:k[1-3]-/ and (r._field == \"value_state_properties_value\" or r._field == \"value_verdict_properties_value\" or r._field == \"value_reason_properties_value\" or r._field == \"value_crew_properties_value\" or r._field == \"value_equipment_properties_value\"))\n  |> filter(fn: (r) => (types.isType(v: r._value, type: \"string\") or types.isType(v: r._value, type: \"bool\")))\n  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
      "refId": "A"
     }
    ],
@@ -151,15 +145,60 @@
       "renameByName": {
        "thingId": "Камера",
        "value_state_properties_value": "Стадия",
-       "value_layer_properties_value": "Слой",
        "value_verdict_properties_value": "Вердикт",
        "value_reason_properties_value": "Причина",
        "value_crew_properties_value": "Звено",
+       "value_equipment_properties_value": "Техника"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": 43,
+   "type": "table",
+   "title": "Камеры: воздух и газы",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "opentwins-influxdb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 21,
+    "w": 24,
+    "h": 10
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "opentwins-influxdb"
+     },
+     "query": "import \"types\"\nfrom(bucket: \"default\")\n  |> range(start: -10m)\n  |> filter(fn: (r) => r.thingId =~ /^org\\.openegiz\\.zhezkazgan:k[1-3]-/ and (r._field == \"value_layer_properties_value\" or r._field == \"value_people_properties_value\" or r._field == \"value_diesel_kw_properties_value\" or r._field == \"value_air_properties_value\" or r._field == \"value_air_required_properties_value\" or r._field == \"value_co_properties_value\" or r._field == \"value_no2_properties_value\" or r._field == \"value_temp_properties_value\"))\n  |> filter(fn: (r) => types.isNumeric(v: r._value))\n  |> group(columns: [\"thingId\", \"_field\"])\n  |> last()\n  |> group()\n  |> pivot(rowKey: [\"thingId\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_time\", \"_measurement\", \"parent\", \"originator\", \"correlationId\", \"topic\", \"host\"])",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "renameByName": {
+       "thingId": "Камера",
+       "value_layer_properties_value": "Слой",
        "value_people_properties_value": "Чел.",
        "value_diesel_kw_properties_value": "Дизель, кВт",
        "value_air_properties_value": "Воздух, м³/мин",
        "value_air_required_properties_value": "Нужно, м³/мин",
        "value_co_properties_value": "CO, %",
+       "value_no2_properties_value": "NO2, %",
        "value_temp_properties_value": "t, °C"
       }
      }
@@ -167,7 +206,7 @@
    ]
   },
   {
-   "id": 41,
+   "id": 44,
    "type": "timeseries",
    "title": "Выпуск руды ПДМ за смену, т",
    "datasource": {
@@ -176,7 +215,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 23,
+    "y": 31,
     "w": 12,
     "h": 8
    },
@@ -215,7 +254,7 @@
    }
   },
   {
-   "id": 42,
+   "id": 45,
    "type": "timeseries",
    "title": "Уровень рудоспусков, т",
    "datasource": {
@@ -224,7 +263,7 @@
    },
    "gridPos": {
     "x": 12,
-    "y": 23,
+    "y": 31,
     "w": 12,
     "h": 8
    },

@@ -209,13 +209,13 @@
       const t = twins[id], g = el('g', {}, L.nodes), x = t.a.x, y = t.a.y, exhaust = t.f.mode === 'исходящая';
       el('circle', { cx: x, cy: y, r: 16, fill: exhaust ? '#3b0f0f' : '#0f2a1a', stroke: exhaust ? '#f97316' : '#22c55e', 'stroke-width': 2.5 }, g);
       lbl(g, x, y + 4, exhaust ? '⇡' : '⇣', 16, exhaust ? '#f97316' : '#22c55e');
-      lbl(g, x, y - 22, t.a.name.split(' (')[0], 9, '#e6edf3');
-      lbl(g, x, y + 30, `${fmt(t.f.q)} м³/с ${t.f.mode}`, 8, '#9fb0c3');
+      lbl(g, x, y - 24, t.a.name.split(' (')[0], 8, '#e6edf3');
+      lbl(g, x, y + 32, `${fmt(t.f.q)} м³/с ${t.f.mode}`, 7, '#9fb0c3');
       hoverable(g, id);
     });
     const fan = T('fan-main');
     if (fan) {
-      const g = el('g', {}, L.nodes), x = fan.a.x + 40, y = fan.a.y, on = fan.f.state === 'работает' && fan.f.speed_pct > 0;
+      const g = el('g', {}, L.nodes), x = fan.a.x + 70, y = fan.a.y, on = fan.f.state === 'работает' && fan.f.speed_pct > 0;
       el('rect', { x: x - 22, y: y - 16, width: 44, height: 32, rx: 4, fill: '#1f2937', stroke: on ? '#22c55e' : '#ef4444', 'stroke-width': 2 }, g);
       const blade = el('text', { x, y: y + 6, fill: on ? '#22c55e' : '#ef4444', 'font-size': 18, 'text-anchor': 'middle' }, g); blade.textContent = '✣';
       if (on) blade.classList.add('pulse');
@@ -256,7 +256,7 @@
       const evac = f.status === 'эвакуация';
       el('rect', { x: a.origin_x - 6, y: a.origin_y - 6, width: w + 12, height: h + 12, rx: 4, fill: evac ? '#3b0f0f55' : '#111820', stroke: evac ? '#ef4444' : f.hazard === 'повышенная' ? '#f59e0b' : '#3a4656', 'stroke-width': evac ? 2.5 : 1.2, 'stroke-dasharray': evac ? '6 4' : '' }, g);
       el('text', { x: a.origin_x, y: a.origin_y - 10, fill: '#e6edf3', 'font-size': 7, 'font-weight': 600 }, g).textContent = `${a.name}: ${fmt(f.q_in)} м³/с, ${fmt(f.people)} чел, ${fmt(f.diesel_kw)} кВт`;
-      el('text', { x: a.origin_x + w, y: a.origin_y - 10, fill: evac ? '#fca5a5' : f.hazard === 'повышенная' ? '#fcd34d' : '#8b98a8', 'font-size': 6, 'text-anchor': 'end' }, g).textContent = `сейсмика ${f.seismic_class}: ${f.hazard}${evac ? ' · ЭВАКУАЦИЯ до ' + fmt(f.evacuated_until_h, 1) + ' ч' : ''} · воздух ${fmt(f.air_required)}/${fmt(f.air_available)}`;
+      el('text', { x: a.origin_x, y: a.origin_y + h + 14, fill: evac ? '#fca5a5' : f.hazard === 'повышенная' ? '#fcd34d' : '#8b98a8', 'font-size': 6 }, g).textContent = `сейсмика ${f.seismic_class}: ${f.hazard}${evac ? ' · ЭВАКУАЦИЯ до ' + fmt(f.evacuated_until_h, 1) + ' ч' : ''} · воздух ${fmt(f.air_required)}/${fmt(f.air_available)}`;
       hoverable(g, pid);
     });
     (byKind.chamber || []).forEach(id => {

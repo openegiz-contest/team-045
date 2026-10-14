@@ -58,6 +58,9 @@ services:
     environment:
       # дашборд «План горизонта» встраивает живую страницу плана через iframe
       GF_PANELS_DISABLE_SANITIZE_HTML: "true"
+      # дашборды открываются без входа (только просмотр): Grafana слушает лишь 127.0.0.1
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
       # the platform mounts provisioning/ read-only, so a single file cannot be
       # added inside it; replace the dashboards provider directory instead

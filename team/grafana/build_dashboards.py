@@ -39,10 +39,15 @@ def flux_many(regex, feature, label="twin"):
             f'  |> group(columns: ["{label}"])\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)')
 
 
-def flux_last_table(regex, features):
+def flux_last_table(regex, features, kind="num"):
+    """Последние значения features по двойникам в одну таблицу. Flux не умеет pivot со
+    смешанными типами, поэтому числовые и текстовые поля идут в разные таблицы."""
     fl = " or ".join(f'r._field == "value_{f}_properties_value"' for f in features)
-    return (f'from(bucket: "default")\n  |> range(start: -10m)\n'
+    typ = 'types.isNumeric(v: r._value)' if kind == "num" else '(types.isType(v: r._value, type: "string") or types.isType(v: r._value, type: "bool"))'
+    conv = '' if kind == "num" else '  |> map(fn: (r) => ({r with _value: string(v: r._value)}))\n'
+    return (f'import "types"\nfrom(bucket: "default")\n  |> range(start: -10m)\n'
             f'  |> filter(fn: (r) => r.thingId =~ /^{NS_RE}:{regex}/ and ({fl}))\n'
+            f'  |> filter(fn: (r) => {typ})\n{conv}'
             f'  |> group(columns: ["thingId", "_field"])\n  |> last()\n  |> group()\n'
             f'  |> pivot(rowKey: ["thingId"], columnKey: ["_field"], valueColumn: "_value")\n'
             f'  |> drop(columns: ["_start", "_stop", "_time", "_measurement", "parent", "originator", "correlationId", "topic", "host"])')
@@ -142,19 +147,20 @@ def air():
         stat("Общая исходящая NO2, % об.", flux_one("agk-vent", "no2"), "", 16, 0, 4, 4, 6, "green",
              [{"color": "green", "value": None}, {"color": "yellow", "value": NO2_LIMIT / 2}, {"color": "red", "value": NO2_LIMIT}]),
         stat("Скорость струи, общая исходящая, м/с", flux_one("agk-vent", "velocity"), "", 20, 0, 4, 4, 1, "blue"),
-        ts("CO на датчиках АГК, % об. (ПДК 0,0016 %)", [flux_many("agk-", "co")], "", 0, 4, 12, 8, min_=0,
+        ts("CO на датчиках АГК, % об. (ПДК 0,0016 %)", [flux_many("agk-", "co")], "", 0, 4, 12, 8, min_=0, max_=0.004,
            thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": CO_LIMIT}]),
-        ts("NO2 на датчиках АГК, % об. (ПДК 0,00026 %)", [flux_many("agk-", "no2")], "", 12, 4, 12, 8, min_=0,
+        ts("NO2 на датчиках АГК, % об. (ПДК 0,00026 %)", [flux_many("agk-", "no2")], "", 12, 4, 12, 8, min_=0, max_=0.0006,
            thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": NO2_LIMIT}]),
         ts("Расход по выработкам, м³/с", [flux_many("aw-", "q")], "", 0, 12, 12, 8, min_=0),
         ts("Скорость струи по выработкам, м/с (0,25–8 м/с)", [flux_many("aw-", "velocity")], "", 12, 12, 12, 8, min_=0,
            thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 8}]),
         ts("Температура на датчиках, °C (не выше 26)", [flux_many("agk-", "temp")], "", 0, 20, 12, 8, thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 26}]),
-        ts("CO в работающих камерах, % об.", [flux_many("k[1-3]-", "co")], "", 12, 20, 12, 8, min_=0,
+        ts("CO в работающих камерах, % об.", [flux_many("k[1-3]-", "co")], "", 12, 20, 12, 8, min_=0, max_=0.004,
            thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": CO_LIMIT}]),
-        table("Датчики АГК: последние показания", flux_last_table("agk-", ["co", "no2", "o2", "co2", "temp", "velocity", "alarm"]), 0, 28, 24, 6,
+        table("Датчики АГК: последние показания", flux_last_table("agk-", ["co", "no2", "o2", "co2", "temp", "velocity"]), 0, 28, 16, 6,
               {"thingId": "Датчик", "value_co_properties_value": "CO, %", "value_no2_properties_value": "NO2, %", "value_o2_properties_value": "O2, %",
-               "value_co2_properties_value": "CO2, %", "value_temp_properties_value": "t, °C", "value_velocity_properties_value": "v, м/с", "value_alarm_properties_value": "Сигнал"}),
+               "value_co2_properties_value": "CO2, %", "value_temp_properties_value": "t, °C", "value_velocity_properties_value": "v, м/с"}),
+        table("Датчики АГК: сигналы", flux_last_table("agk-", ["alarm"], "str"), 16, 28, 8, 6, {"thingId": "Датчик", "value_alarm_properties_value": "Сигнал"}),
     ]
     return dashboard("vzhr-air", "ВЖР: воздух и газы", p)
 
@@ -172,27 +178,29 @@ def ground():
         ts("Сейсмика по панелям: толчков за смену и максимальная энергия, Дж", [flux_many("panel-", "bumps_shift"), flux_many("panel-", "max_bump_energy")], "", 12, 9, 12, 8, min_=0),
         ts("Напряжение и прочность целиков П-1, МПа", [flux_many("c1-", "stress"), flux_many("c1-", "strength")], "", 0, 17, 12, 8, min_=0),
         ts("Вынуто слоёв по панелям", [flux_many("panel-", "layers_mined")], "", 12, 17, 12, 8, min_=0),
-        table("Целики: последнее состояние", flux_last_table("c[1-3]-", ["height", "strength", "stress", "sf", "convergence", "status", "extracted"]), 0, 25, 24, 12,
+        table("Целики: последнее состояние", flux_last_table("c[1-3]-", ["height", "strength", "stress", "sf", "convergence"]), 0, 25, 16, 12,
               {"thingId": "Целик", "value_height_properties_value": "Высота, м", "value_strength_properties_value": "Прочность, МПа", "value_stress_properties_value": "Напряжение, МПа",
-               "value_sf_properties_value": "SF", "value_convergence_properties_value": "Конвергенция, мм/сут", "value_status_properties_value": "Статус", "value_extracted_properties_value": "Извлечён"}),
+               "value_sf_properties_value": "SF", "value_convergence_properties_value": "Конвергенция, мм/сут"}),
+        table("Целики: статус", flux_last_table("c[1-3]-", ["status", "extracted"], "str"), 16, 25, 8, 12,
+              {"thingId": "Целик", "value_status_properties_value": "Статус", "value_extracted_properties_value": "Извлечён"}),
     ]
     return dashboard("vzhr-ground", "ВЖР: горное давление и целики", p)
 
 
 def plan():
     p = [
-        table("Наряд: звенья", flux_last_table("crew-", ["chamber", "task", "state", "people", "exposure_co"]), 0, 0, 12, 7,
-              {"thingId": "Звено", "value_chamber_properties_value": "Камера", "value_task_properties_value": "Работа", "value_state_properties_value": "Состояние",
-               "value_people_properties_value": "Чел.", "value_exposure_co_properties_value": "Экспозиция CO, %·ч"}),
-        table("Техника", flux_last_table("(pdm|sbu)-", ["chamber", "state", "kw_running", "tonnes_shift", "hours", "rounds_total"]), 12, 0, 12, 7,
-              {"thingId": "Машина", "value_chamber_properties_value": "Камера", "value_state_properties_value": "Состояние", "value_kw_running_properties_value": "кВт",
-               "value_tonnes_shift_properties_value": "т за смену", "value_hours_properties_value": "Наработка, ч", "value_rounds_total_properties_value": "Заходок"}),
-        table("Камеры: вердикт наряда", flux_last_table("k[1-3]-", ["state", "layer", "verdict", "reason", "crew", "people", "diesel_kw", "air", "air_required", "co", "temp"]), 0, 7, 24, 16,
-              {"thingId": "Камера", "value_state_properties_value": "Стадия", "value_layer_properties_value": "Слой", "value_verdict_properties_value": "Вердикт", "value_reason_properties_value": "Причина",
-               "value_crew_properties_value": "Звено", "value_people_properties_value": "Чел.", "value_diesel_kw_properties_value": "Дизель, кВт",
-               "value_air_properties_value": "Воздух, м³/мин", "value_air_required_properties_value": "Нужно, м³/мин", "value_co_properties_value": "CO, %", "value_temp_properties_value": "t, °C"}),
-        ts("Выпуск руды ПДМ за смену, т", [flux_many("pdm-", "tonnes_shift")], "", 0, 23, 12, 8, min_=0),
-        ts("Уровень рудоспусков, т", [flux_many("rs-", "level")], "", 12, 23, 12, 8, min_=0),
+        table("Наряд: звенья", flux_last_table("crew-", ["chamber", "task", "state"], "str"), 0, 0, 12, 7,
+              {"thingId": "Звено", "value_chamber_properties_value": "Камера", "value_task_properties_value": "Работа", "value_state_properties_value": "Состояние"}),
+        table("Техника", flux_last_table("(pdm|sbu)-", ["chamber", "state"], "str"), 12, 0, 12, 7,
+              {"thingId": "Машина", "value_chamber_properties_value": "Камера", "value_state_properties_value": "Состояние"}),
+        table("Камеры: вердикт наряда", flux_last_table("k[1-3]-", ["state", "verdict", "reason", "crew", "equipment"], "str"), 0, 7, 24, 14,
+              {"thingId": "Камера", "value_state_properties_value": "Стадия", "value_verdict_properties_value": "Вердикт", "value_reason_properties_value": "Причина",
+               "value_crew_properties_value": "Звено", "value_equipment_properties_value": "Техника"}),
+        table("Камеры: воздух и газы", flux_last_table("k[1-3]-", ["layer", "people", "diesel_kw", "air", "air_required", "co", "no2", "temp"]), 0, 21, 24, 10,
+              {"thingId": "Камера", "value_layer_properties_value": "Слой", "value_people_properties_value": "Чел.", "value_diesel_kw_properties_value": "Дизель, кВт",
+               "value_air_properties_value": "Воздух, м³/мин", "value_air_required_properties_value": "Нужно, м³/мин", "value_co_properties_value": "CO, %", "value_no2_properties_value": "NO2, %", "value_temp_properties_value": "t, °C"}),
+        ts("Выпуск руды ПДМ за смену, т", [flux_many("pdm-", "tonnes_shift")], "", 0, 31, 12, 8, min_=0),
+        ts("Уровень рудоспусков, т", [flux_many("rs-", "level")], "", 12, 31, 12, 8, min_=0),
     ]
     return dashboard("vzhr-plan", "ВЖР: наряд, камеры и техника", p)
 
