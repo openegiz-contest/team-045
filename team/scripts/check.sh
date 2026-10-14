@@ -46,6 +46,7 @@ done
 
 echo "План горизонта и сценарии"
 if curl -sf "$MAP/" | grep -q "Жезказган"; then pass "план горизонта отдаётся на $MAP/"; else fail "план горизонта не отдаётся"; fi
+if curl -sf -o /dev/null "$MAP/static/three/three.module.js" && curl -sf -o /dev/null "$MAP/static/view3d.js"; then pass "3D-сцена: Three.js и view3d.js отдаются локально"; else fail "файлы 3D-сцены не отдаются"; fi
 n=$(curl -sf "$MAP/api/state" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["twins"]))' 2>/dev/null || echo 0)
 if [ "${n:-0}" -ge 160 ]; then pass "состояние карты содержит $n двойников из Ditto"; else fail "в состоянии карты только ${n:-0} двойников"; fi
 curl -sf -XPOST "$MAP/api/command" -H 'Content-Type: application/json' -d '{"action":"door","target":"aw-door-3","on":true}' >/dev/null || fail "POST команды не прошёл"

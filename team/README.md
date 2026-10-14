@@ -17,6 +17,7 @@ team/
 │   ├── run_sim.py           MQTT: telemetry/<twin> (Ditto protocol), zhezkazgan/commands, zhezkazgan/events
 │   └── control.py           план горизонта и панель наряда/сценариев (HTTP :8095), данные из Ditto
 ├── static/index.html        живой 2D-план (SVG), строится из атрибутов и features двойников
+├── static/view3d.js         3D-сцена того же горизонта на Three.js (static/three, MIT, без внешних ресурсов)
 ├── grafana/                 build_dashboards.py → dashboards/*.json, provisioning/
 ├── scripts/                 urls.sh, check.sh (сквозная проверка), dev_preview.py (без платформы)
 └── data/seismic-bumps/      seismic-bumps.arff (UCI, CC BY 4.0) — калибровка сейсмичности
