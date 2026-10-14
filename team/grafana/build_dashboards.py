@@ -63,7 +63,7 @@ def target(q, ref="A"):
 def stat(title, q, unit="", x=0, y=0, w=4, h=4, decimals=None, color="blue", thresholds=None, text=False):
     p = {"id": nid(), "type": "stat", "title": title, "datasource": DS, "gridPos": {"x": x, "y": y, "w": w, "h": h},
          "targets": [target(q)],
-         "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "/.*/" if text else "", "values": False}, "colorMode": "none" if text else "value",
+         "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "/^(?!Time)/" if text else "", "values": False}, "colorMode": "none" if text else "value",
                      "graphMode": "none" if text else "area", "textMode": "value", "justifyMode": "auto"},
          "fieldConfig": {"defaults": {"unit": unit, "color": {"mode": "fixed", "fixedColor": color}}, "overrides": []}}
     if decimals is not None:
