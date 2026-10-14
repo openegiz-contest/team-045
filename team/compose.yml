@@ -59,5 +59,8 @@ services:
       # the "Mine map" dashboard embeds the live map page in an iframe
       GF_PANELS_DISABLE_SANITIZE_HTML: "true"
     volumes:
-      - ../../team/grafana/provisioning.yaml:/etc/grafana/provisioning/dashboards/sarybulak.yaml:ro
+      # the platform mounts provisioning/ read-only, so a single file cannot be
+      # added inside it; replace the dashboards provider directory instead
+      # (it carries a copy of the platform's own openegiz.yaml plus ours)
+      - ../../team/grafana/provisioning:/etc/grafana/provisioning/dashboards:ro
       - ../../team/grafana/dashboards:/var/lib/grafana/sarybulak-dashboards:ro
