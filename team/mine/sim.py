@@ -430,6 +430,11 @@ class Mine:
             truck.state = "queued_at_dump"
             self.dump_queue.append(truck)
         elif dst == "fuel":
+            if truck.since_service >= C.RELIABILITY["truck"]["service_interval_h"] and not truck.forced_parked:
+                truck.state = "service"          # planned maintenance in the workshop
+                truck.down_timer = C.RELIABILITY["truck"]["service_h"] * 3600
+                self.log(f"{truck.id}: плановое ТО после {truck.since_service:.0f} ч наработки")
+                return
             truck.state = "queued_at_fuel"
             self.fuel_queue.append(truck)
         truck.timer = 0.0
@@ -443,7 +448,8 @@ class Mine:
                 truck.state = "to_fuel"
                 truck.destination = "fuel"
             return
-        if truck.fuel < C.TRUCK["refuel_below_l"]:
+        if truck.fuel < C.TRUCK["refuel_below_l"] or truck.since_service >= C.RELIABILITY["truck"]["service_interval_h"]:
+            # fuel station and workshop share the "fuel" node: refuel, or planned service when due
             self._start_trip(truck, "fuel")
             return
         ex = self._choose_excavator(truck)
@@ -540,6 +546,11 @@ class Mine:
                 ex.state = "idle" if ex.block else "no_block"
                 if ex.state == "idle":
                     self.log(f"{ex.id}: снова в работе")
+            return
+        if ex.since_service >= C.RELIABILITY["excavator"]["service_interval_h"] and ex.loading_truck is None:
+            ex.state, ex.down_timer, ex.since_service = "service", C.RELIABILITY["excavator"]["service_h"] * 3600, 0.0
+            self._release_loading(ex)
+            self.log(f"{ex.id}: плановое ТО, {C.RELIABILITY['excavator']['service_h']:.0f} ч")
             return
         if ex.block is None:
             self._next_block(ex)
