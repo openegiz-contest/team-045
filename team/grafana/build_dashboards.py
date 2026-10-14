@@ -27,10 +27,12 @@ def nid():
     return _id[0]
 
 
-def flux_one(thing, feature):
+def flux_one(thing, feature, label=None):
+    """Одна величина одного двойника; label подписывает линию на графике с несколькими запросами."""
+    name = label or f"{thing}.{feature}"
     return (f'from(bucket: "default")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n'
             f'  |> filter(fn: (r) => r.thingId == "{NS}:{thing}" and r._field == "value_{feature}_properties_value")\n'
-            f'  |> keep(columns: ["_time", "_value"])')
+            f'  |> map(fn: (r) => ({{_time: r._time, _value: r._value, _field: "{name}"}}))\n  |> group(columns: ["_field"])')
 
 
 def flux_many(regex, feature, label="twin"):
@@ -61,7 +63,7 @@ def target(q, ref="A"):
 def stat(title, q, unit="", x=0, y=0, w=4, h=4, decimals=None, color="blue", thresholds=None, text=False):
     p = {"id": nid(), "type": "stat", "title": title, "datasource": DS, "gridPos": {"x": x, "y": y, "w": w, "h": h},
          "targets": [target(q)],
-         "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}, "colorMode": "none" if text else "value",
+         "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "/.*/" if text else "", "values": False}, "colorMode": "none" if text else "value",
                      "graphMode": "none" if text else "area", "textMode": "value", "justifyMode": "auto"},
          "fieldConfig": {"defaults": {"unit": unit, "color": {"mode": "fixed", "fixedColor": color}}, "overrides": []}}
     if decimals is not None:
@@ -127,10 +129,10 @@ def overview():
              [{"color": "red", "value": None}, {"color": "yellow", "value": 150}, {"color": "green", "value": 220}]),
         stat("Выдано руды, т", flux_one("hoist", "tonnes_total"), "", 18, 0, 3, 4, 0, "orange"),
         stat("Сигнал АГК", flux_one("east-mine", "alarm"), "", 21, 0, 3, 4, None, "red", text=True),
-        ts("Вердикты по камерам (разрешено / ограничено / запрещено)", [flux_one("east-mine", "chambers_allowed"), flux_one("east-mine", "chambers_restricted"), flux_one("east-mine", "chambers_forbidden")], "", 0, 4, 12, 8, min_=0),
+        ts("Вердикты по камерам (разрешено / ограничено / запрещено)", [flux_one("east-mine", "chambers_allowed", "разрешено"), flux_one("east-mine", "chambers_restricted", "ограничено"), flux_one("east-mine", "chambers_forbidden", "запрещено")], "", 0, 4, 12, 8, min_=0),
         ts("Воздух в панелях: подача, м³/с", [flux_many("panel-", "q_in")], "", 12, 4, 12, 8, min_=0),
         ts("Люди и дизельная техника в панелях", [flux_many("panel-", "people"), flux_many("panel-", "diesel_kw")], "", 0, 12, 12, 8, min_=0),
-        ts("Выдача руды: подъём, т/ч, и накоплено, т", [flux_one("hoist", "throughput"), flux_one("hoist", "tonnes_total")], "", 12, 12, 12, 8, min_=0),
+        ts("Выдача руды: подъём, т/ч, и накоплено, т", [flux_one("hoist", "throughput", "подъём, т/ч"), flux_one("hoist", "tonnes_total", "выдано, т")], "", 12, 12, 12, 8, min_=0),
         ts("Сейсмическая энергия за смену по панелям, Дж", [flux_many("panel-", "seismic_energy_shift")], "", 0, 20, 12, 8, min_=0),
         ts("Потребность и наличие воздуха в панелях, м³/мин", [flux_many("panel-", "air_required"), flux_many("panel-", "air_available")], "", 12, 20, 12, 8, min_=0),
         stat("Активные сценарии", flux_one("east-mine", "active_scenarios"), "", 0, 28, 12, 3, None, "yellow", text=True),

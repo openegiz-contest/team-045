@@ -9,7 +9,7 @@
  "editable": true,
  "refresh": "5s",
  "schemaVersion": 39,
- "version": 1791993362,
+ "version": 1791997449,
  "time": {
   "from": "now-30m",
   "to": "now"
@@ -35,7 +35,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_q_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_q_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"fan-main.q\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -84,7 +84,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_pressure_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_pressure_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"fan-main.pressure\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -133,7 +133,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_speed_pct_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_speed_pct_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"fan-main.speed_pct\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -182,7 +182,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:agk-vent\" and r._field == \"value_co_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:agk-vent\" and r._field == \"value_co_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"agk-vent.co\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -247,7 +247,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:agk-vent\" and r._field == \"value_no2_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:agk-vent\" and r._field == \"value_no2_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"agk-vent.no2\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -312,7 +312,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:agk-vent\" and r._field == \"value_velocity_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:agk-vent\" and r._field == \"value_velocity_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"agk-vent.velocity\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],

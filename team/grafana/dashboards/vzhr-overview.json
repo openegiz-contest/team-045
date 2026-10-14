@@ -9,7 +9,7 @@
  "editable": true,
  "refresh": "5s",
  "schemaVersion": 39,
- "version": 1791993362,
+ "version": 1791997449,
  "time": {
   "from": "now-30m",
   "to": "now"
@@ -35,7 +35,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_shift_no_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_shift_no_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.shift_no\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -84,7 +84,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_people_underground_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_people_underground_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.people_underground\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -133,7 +133,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_allowed_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_allowed_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.chambers_allowed\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -182,7 +182,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_restricted_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_restricted_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.chambers_restricted\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -231,7 +231,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_forbidden_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_forbidden_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.chambers_forbidden\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -280,7 +280,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_q_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:fan-main\" and r._field == \"value_q_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"fan-main.q\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -345,7 +345,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:hoist\" and r._field == \"value_tonnes_total_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:hoist\" and r._field == \"value_tonnes_total_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"hoist.tonnes_total\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -394,7 +394,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_alarm_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_alarm_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.alarm\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -403,7 +403,7 @@
      "calcs": [
       "lastNotNull"
      ],
-     "fields": "",
+     "fields": "/.*/",
      "values": false
     },
     "colorMode": "none",
@@ -442,7 +442,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_allowed_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_allowed_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"разрешено\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     },
     {
@@ -450,7 +450,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_restricted_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_restricted_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"ограничено\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "B"
     },
     {
@@ -458,7 +458,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_forbidden_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_chambers_forbidden_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"запрещено\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "C"
     }
    ],
@@ -610,7 +610,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:hoist\" and r._field == \"value_throughput_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:hoist\" and r._field == \"value_throughput_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"подъём, т/ч\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     },
     {
@@ -618,7 +618,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:hoist\" and r._field == \"value_tonnes_total_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:hoist\" and r._field == \"value_tonnes_total_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"выдано, т\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "B"
     }
    ],
@@ -770,7 +770,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_active_scenarios_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:east-mine\" and r._field == \"value_active_scenarios_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"east-mine.active_scenarios\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -779,7 +779,7 @@
      "calcs": [
       "lastNotNull"
      ],
-     "fields": "",
+     "fields": "/.*/",
      "values": false
     },
     "colorMode": "none",
@@ -818,7 +818,7 @@
       "type": "influxdb",
       "uid": "opentwins-influxdb"
      },
-     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:shift-plan\" and r._field == \"value_plan_properties_value\")\n  |> keep(columns: [\"_time\", \"_value\"])",
+     "query": "from(bucket: \"default\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r.thingId == \"org.openegiz.zhezkazgan:shift-plan\" and r._field == \"value_plan_properties_value\")\n  |> map(fn: (r) => ({_time: r._time, _value: r._value, _field: \"shift-plan.plan\"}))\n  |> group(columns: [\"_field\"])",
      "refId": "A"
     }
    ],
@@ -827,7 +827,7 @@
      "calcs": [
       "lastNotNull"
      ],
-     "fields": "",
+     "fields": "/.*/",
      "values": false
     },
     "colorMode": "none",
