@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print where the Sarybulak mine can be seen.
+# Где смотреть цифровой двойник горизонта ВЖР.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
@@ -7,12 +7,12 @@ set -a; . "$ROOT/deploy/compose/.env"; set +a
 H="${OPENEGIZ_PUBLIC_HOST:-localhost}"
 cat <<TXT
 
-Sarybulak mine is running.
+Восточно-Жезказганский рудник, горизонт 300 м: двойник работает.
 
-  Mine map + what-if scenarios   http://$H:${MINE_PORT:-8095}/
-  Grafana dashboards             http://$H:$GRAFANA_PORT/dashboards?query=Sarybulak   admin / $GRAFANA_ADMIN_PASSWORD
-  Twins                          Grafana -> OpenEgiz -> Twins (namespace org.openegiz.sarybulak)
-  Ditto API                      http://$H:$DITTO_PORT/api/2/search/things?namespaces=org.openegiz.sarybulak   ditto / $DITTO_PASSWORD
+  План горизонта, наряд смены, сценарии   http://$H:${MINE_PORT:-8095}/
+  Дашборды Grafana (папка «ВЖР»)          http://$H:$GRAFANA_PORT/dashboards?query=ВЖР   admin / $GRAFANA_ADMIN_PASSWORD
+  Двойники и иерархия                     Grafana -> OpenEgiz -> Twins, пространство имён org.openegiz.zhezkazgan
+  Ditto API                               http://$H:$DITTO_PORT/api/2/search/things?namespaces=org.openegiz.zhezkazgan   ditto / $DITTO_PASSWORD
 
-Check everything with: make mine-check
+Сквозная проверка: make mine-check
 TXT

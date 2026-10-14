@@ -1,161 +1,210 @@
 """
-Sarybulak open-pit copper mine: layout, fleet and process parameters.
+Восточно-Жезказганский рудник (ВЖР, Казахмыс, г. Сатпаев): один добычной
+горизонт камерно-столбовой системы. Параметры, которые делят между собой
+симулятор, двойники и карта. У каждого числа указан источник: нормативный
+документ, публикация, набор данных, слова работника рудника, либо явное
+допущение (ДОПУЩЕНИЕ).
 
-Everything the simulator, the twins and the map share lives here. Each number
-carries its source in a comment: an equipment data sheet, a reference book,
-a public dataset or an explicit engineering assumption (marked ASSUMPTION).
-
-Coordinates are metres in a local grid; x grows east, y grows south (screen
-orientation), origin at the north-west corner of the site. The pit lies in the
-west, the plant in the east.
+Координаты: метры в плане горизонта, x на восток, y на юг (ориентация экрана).
 """
 
-NAMESPACE = "org.openegiz.sarybulak"
-MINE_ID = "mine"
+NAMESPACE = "org.openegiz.zhezkazgan"
+MINE_ID = "east-mine"
 
 # ---------------------------------------------------------------------------
-# Geology: a porphyry copper deposit of Kazakh type.
-#   Average grades of Kazakh porphyry mines: Bozshakol 0.36 % Cu, Aktogay
-#   0.33 % Cu (USGS Open-File Report 2010-1255, Mineral Facilities of Northern
-#   and Central Eurasia; company annual reports). Our block grades scatter
-#   around 0.4 % Cu with a richer core, cut-off 0.25 % Cu (ASSUMPTION, typical
-#   for low-grade open-pit copper).
-#   Bond work index of porphyry copper ore 12-18 kWh/t (Bond, 1961; GeoMet
-#   dataset, Zenodo 7051975 gives hardness classes). Rock density 2.7 t/m3.
+# Рудник
+#   ВЖР объединяет шахты 57, 73/75, 55 и Анненскую; проектная мощность
+#   5 500 тыс. т/год (программа производственного экологического контроля
+#   ВЖР, hearings.ndbecology.gov.kz). Шахта 73/75 пущена в 2000 г. с проектной
+#   мощностью 2 млн т/год (kazakhmys.kz, история). Горизонты Жезказгана
+#   отрабатываются на глубинах до 270 м и глубже (inform.kz, 2023), для модели
+#   взят горизонт 300 м (ДОПУЩЕНИЕ). Жезказган: свита пологих залежей медистых
+#   песчаников, камерно-столбовая система, более 40 тыс. оставленных целиков
+#   (earthpapers.net, автореферат по геомеханике Жезказгана).
 # ---------------------------------------------------------------------------
-CUTOFF_GRADE = 0.25          # % Cu, ore / waste boundary
-ROCK_DENSITY = 2.7           # t/m3
-BLOCK_SIZE_M = 25.0          # block side, m (25 x 25 x 15 m bench height)
-BENCH_HEIGHT_M = 15.0
-BLOCK_TONNES = BLOCK_SIZE_M * BLOCK_SIZE_M * BENCH_HEIGHT_M * ROCK_DENSITY  # ~25 300 t
-SWELL_FACTOR = 1.0           # tonnes are tonnes; swell only matters for volume
-
-# Benches: top of the pit is bench 545, mining goes down.
-BENCHES = [
-    # id, elevation m, origin (x, y) of the block grid, grid columns x rows
-    {"id": "bench-545", "elevation": 545, "origin": (140, 380), "cols": 5, "rows": 3},
-    {"id": "bench-530", "elevation": 530, "origin": (200, 640), "cols": 5, "rows": 3},
-]
-
-# Grade field: a smooth "ore body" bulge plus deterministic noise, so blocks
-# near the centre of the pit are richer. Evaluated in blocks.py.
-GRADE_CENTER = (330, 560)    # x, y of the richest point
-GRADE_PEAK = 1.10            # % Cu at the centre
-GRADE_FLOOR = 0.10           # % Cu far from the centre
-GRADE_RADIUS = 130.0         # m, fall-off scale
-HARDNESS_MIN, HARDNESS_MAX = 12.0, 18.0   # Bond Wi, kWh/t
+MINE_NAME = "Восточно-Жезказганский рудник, шахта 73/75, горизонт 300 м"
+DEPTH_M = 300.0
+ROCK_DENSITY = 2.6               # т/м3, медистые песчаники (справочные данные по Жезказгану)
+ORE_GRADE_PCT = 0.9              # % Cu в камерах, Жезказган 0,6–1,5 % (dokumen.pub, монография; inform.kz)
+UCS_MPA = 110.0                  # прочность песчаника на сжатие, МПа (ДОПУЩЕНИЕ в диапазоне 90–150 МПа)
 
 # ---------------------------------------------------------------------------
-# Fleet
-#   Excavator: Komatsu PC2000-11 class, 12 m3 bucket, 22 t per pass in blasted
-#   rock, 30-35 s pass cycle (Komatsu PC2000-11 spec sheet; Caterpillar
-#   Performance Handbook, hydraulic shovel cycle times).
-#   Haul truck: Caterpillar 777G, nominal payload 98.6 t, operated at 91 t
-#   (CAT 777G spec sheet); loaded speed on an 8 % ramp 15-20 km/h, empty on
-#   the flat 35-40 km/h (CAT 777G rimpull-speed curves); fuel burn 777 class:
-#   hauling loaded 65-80 L/h, empty 35-45 L/h, idle 8-12 L/h (Caterpillar
-#   Performance Handbook fuel consumption tables, medium-high duty).
-#   OpenMines north_pit_mine.json (MIT; team/data/openmines) gives a real pit
-#   with 71 trucks of 35-77 t at 25 km/h average and 3-5 km hauls, 20 t
-#   shovels at 1.5 min per load: our hauls (2.4-4.2 km) and cycle times sit
-#   inside that envelope.
+# Камерно-столбовая система (Южно-Жезказганский рудник, отчёт по практике,
+# stud.kz: сетка междукамерных целиков 20×20 м, пролёт между целиками не более
+# 15,5 м; слоевая выемка слоями 4–5 м при мощной залежи, poznayka.org).
+#   Камера: 10 × 20 м в плане, слой 4,5 м -> 10·20·4,5·2,6 ≈ 2 340 т руды.
+#   Целик: столбчатый 10 × 10 м; высота растёт с числом вынутых слоёв, и
+#   именно рост высоты целика при слоевой выемке мощной залежи снижает его
+#   запас прочности (проблема Жезказгана: более 40 тыс. целиков).
 # ---------------------------------------------------------------------------
-EXCAVATORS = [
-    {"id": "excavator-01", "name": "Экскаватор ЭКГ-1 (PC2000)", "bench": "bench-545", "bucket_t": 22.0, "pass_s": 32.0},
-    {"id": "excavator-02", "name": "Экскаватор ЭКГ-2 (PC2000)", "bench": "bench-530", "bucket_t": 22.0, "pass_s": 32.0},
-]
+GRID_M = 20.0                    # сетка целиков
+CHAMBER_W, CHAMBER_L, LAYER_H = 10.0, 20.0, 4.5
+PILLAR_W = 10.0
+CHAMBER_TONNES = CHAMBER_W * CHAMBER_L * LAYER_H * ROCK_DENSITY     # ≈ 2 808 т за слой
+CHAMBER_VOLUME = CHAMBER_W * CHAMBER_L * LAYER_H                    # м3, для проветривания
+EXTRACTION_RATIO = 1 - (PILLAR_W * PILLAR_W) / (GRID_M * GRID_M)   # 0,75
 
-TRUCK_COUNT = 6
-TRUCK = {
-    "model": "CAT 777G",
-    "capacity_t": 91.0,
-    "tank_l": 1137.0,                 # CAT 777G fuel tank
-    "speed_loaded_ramp_kmh": 17.0,    # 8 % ramp, loaded
-    "speed_loaded_flat_kmh": 32.0,
-    "speed_empty_ramp_kmh": 28.0,     # downhill empty, retarder-limited
-    "speed_empty_flat_kmh": 38.0,
-    "fuel_lph": {"hauling": 72.0, "returning": 40.0, "idle": 10.0, "loading": 12.0, "dumping": 12.0},
-    "dump_s": 55.0,                   # body raise + lower, 777 class (Cat handbook ~0.9 min)
-    "spot_s": 25.0,                   # spotting at the shovel
-    "refuel_below_l": 180.0,          # ASSUMPTION: refuel when < ~16 % of tank
-    "refuel_rate_lpm": 400.0,         # high-flow diesel nozzle 300-500 L/min
+# ---------------------------------------------------------------------------
+# Прочность целиков: Хедли–Грант (1972): S = K · w^0.5 / h^0.75, K калибруется
+# на 0,6–0,7 UCS (SAIMM, UG2 pillar strength studies: K = 70–75 МПа при
+# UCS ≈ 120 МПа). Напряжение по теории площадей влияния: σ = ρ g H / (1 − e).
+# Коэффициент запаса SF = S / σ. Пороги наряда: SF ≥ 1,6 работа разрешена,
+# 1,3–1,6 ограничения и осмотр, < 1,3 камеры у целика закрыты (ДОПУЩЕНИЕ по
+# практике проектирования целиков SF 1,3–1,6).
+# ---------------------------------------------------------------------------
+PILLAR_K_MPA = 0.70 * UCS_MPA
+SF_OK, SF_WATCH = 1.5, 1.3
+CONVERGENCE_WATCH_MM_D, CONVERGENCE_CLOSE_MM_D = 1.0, 2.5   # мм/сут по датчикам конвергенции (ДОПУЩЕНИЕ)
+
+# ---------------------------------------------------------------------------
+# Сейсмичность: набор данных seismic-bumps (UCI, CC BY 4.0, 2 584 смены
+# подземного рудника): при оценке «a» опасный толчок в следующую смену в 4,9 %
+# смен, при «b» в 9,6 %; в среднем 0,73 и 1,10 толчка за смену; энергия
+# суммарная за смену: медиана 0, 90-й процентиль 8 700 Дж, максимум 402 000 Дж.
+# Копия набора: team/data/seismic-bumps.
+# ---------------------------------------------------------------------------
+SEISMIC = {
+    "a": {"bumps_per_shift": 0.73, "hazard_next_shift": 0.049},
+    "b": {"bumps_per_shift": 1.10, "hazard_next_shift": 0.096},
+    "energy_p90_j": 8700.0, "energy_max_j": 402000.0,
+    "stop_energy_j": 50000.0,          # толчок с такой энергией -> вывод людей из панели на 2 ч (ДОПУЩЕНИЕ)
+    "evacuate_h": 2.0,
 }
 
 # ---------------------------------------------------------------------------
-# Road network: nodes with coordinates; segments with length (m, measured along
-# the switchbacks, hence longer than the straight line), gradient (%), and a
-# polyline for drawing. Lengths are ASSUMPTIONS consistent with OpenMines
-# haul distances (3-5 km) for a mid-sized pit.
+# Воздух. Технический регламент РК «Требования к безопасности процессов
+# разработки рудных, нерудных и россыпных месторождений подземным способом»
+# (adilet.zan.kz, P090002207): O2 ≥ 20 %, CO2 ≤ 0,5 %, CO ≤ 0,0016 % (20 мг/м3);
+# скорость струи в добычных забоях ≥ 0,5 м/с, в проходческих ≥ 0,25 м/с,
+# не более 4 м/с в забоях и 8 м/с в главных выработках. NO2 ≤ 5 мг/м3
+# (0,00026 %) — норма, принятая в ЕАЭС/РФ (ФНП 505), используется как
+# ДОПУЩЕНИЕ. Норма воздуха: 6 м3/мин на человека и 6,8 м3/мин на 1 кВт
+# дизельного двигателя (методика расчёта расхода воздуха для рудников,
+# vnedra.ru; норматив 5 м3/мин на л.с.). Температура ≤ 26 °C.
+# ---------------------------------------------------------------------------
+AIR = {
+    "per_person_m3min": 6.0,
+    "per_diesel_kw_m3min": 6.8,
+    "co_limit_pct": 0.0016, "no2_limit_pct": 0.00026, "co2_limit_pct": 0.5, "o2_min_pct": 20.0,
+    "v_min_face": 0.5, "v_max_face": 4.0, "v_max_main": 8.0,
+    "t_max_c": 26.0,
+    "blast_reentry_min": 30.0,         # не ранее 30 мин после взрыва и по газам (техрегламент РК)
+    "aux_fan_m3min": 420.0,            # ВМП типа ВМЭ-6 (400–500 м3/мин) для тупиковых забоев; камеры панели
+                                       # проветриваются сквозной струёй панели, ВМП только добавляет
+    "panel_share": 0.85,               # доля струи панели, доходящая до работающих камер (утечки 15 %, ДОПУЩЕНИЕ)
+    "aux_fan_kw": 24.0,
+    "rock_temp_c": 18.0,               # температура пород на 300 м Жезказган (ДОПУЩЕНИЕ, геотерм. ступень)
+}
+
+# Выделение CO и NO2 дизелем: 6 г/ч CO и 2 г/ч NO2 на 1 кВт при работе (техника
+# Tier 3 с каталитическими нейтрализаторами, ДОПУЩЕНИЕ); 1 г/м3 CO = 0,08 % об.
+DIESEL_EMISSION = {"co_g_per_kwh": 6.0, "no2_g_per_kwh": 2.0, "heat_kw_per_kw": 1.5}
+# Взрывные газы: 1 кг ВВ даёт ~40 л условного CO (норма расчёта проветривания после взрыва);
+# заряд на слой камеры ≈ 1,2 кг/м3 → ~1 300 кг ВВ (ДОПУЩЕНИЕ, удельный расход 0,4–0,5 кг/т).
+BLAST = {"explosive_kg": 1300.0, "co_l_per_kg": 40.0}
+
+# ---------------------------------------------------------------------------
+# Главный вентилятор: ВГП типа ВОД-30 на вентиляционном стволе, подача
+# 200–350 м3/с при депрессии 1,5–3 кПа (каталожные данные ВОД-30, ДОПУЩЕНИЕ по
+# подбору). Аэродинамическое сопротивление выработок: Атkinson R = α P L / A³,
+# α ≈ 0,01–0,02 Н·с²/м⁴ для крепких пород без крепи.
+# ---------------------------------------------------------------------------
+FAN = {"name": "ВГП ВОД-30, вентиляционный ствол", "q_nominal_m3s": 260.0, "p_nominal_pa": 2200.0,
+       "power_kw": 800.0, "alpha": 0.015}
+
+# ---------------------------------------------------------------------------
+# Техника. ПДМ Sandvik LH517i: ковш 17 т, дизель 352 кВт (каталог Sandvik).
+# Подземные самосвалы CAT AD45B на Жезказгане (inform.kz): 45 т, 429 кВт.
+# Буровая установка Sandvik DD421: дизель только на переезд 110 кВт, бурение
+# от сети. Звено: 5 человек на камеру (ДОПУЩЕНИЕ; со слов работника рудника —
+# в камере работают по 4–6 человек).
+# ---------------------------------------------------------------------------
+LHD = {"model": "Sandvik LH517i", "bucket_t": 17.0, "kw": 352.0, "cycle_s": 150.0}   # цикл ковша к рудоспуску 2–3 мин
+JUMBO = {"model": "Sandvik DD421", "kw_tramming": 110.0, "round_h": 4.0}
+TRUCK = {"model": "CAT AD45B", "payload_t": 45.0, "kw": 429.0}
+CREW_SIZE = 5
+CREWS = ["crew-1", "crew-2", "crew-3", "crew-4"]      # имена двойников ASCII; отображаемое имя «Звено N»
+LHDS = ["pdm-01", "pdm-02", "pdm-03"]
+JUMBOS = ["sbu-01", "sbu-02"]
+
+# Цикл камеры за слой (часы): бурение, заряжание, взрыв (между сменами),
+# проветривание (по газам, ≥ 30 мин), оборка, крепление, выпуск ПДМ.
+CYCLE_H = {"drilling": 4.0, "charging": 1.5, "scaling": 1.0, "bolting": 2.0}
+SHIFT_H = 8.0
+
+# Рудоспуск, дробилка, подъём: подземная дробилка 600 т/ч, скиповой подъём
+# 800 т/ч (ДОПУЩЕНИЕ в масштабе шахты 2 млн т/год ≈ 300 т/ч среднее).
+ORE_PASS_CAPACITY_T = 1500.0
+CRUSHER_TPH = 600.0
+HOIST_TPH = 800.0
+
+# ---------------------------------------------------------------------------
+# План горизонта (условная схема по типовой компоновке камерно-столбового
+# горизонта: стволы, главный откаточный штрек, вентиляционный штрек, орты в
+# панели; ДОПУЩЕНИЕ). Узлы вентиляционной сети и выработки.
 # ---------------------------------------------------------------------------
 NODES = {
-    "face-545":  {"xy": (300, 440),  "name": "Забой 545"},
-    "face-530":  {"xy": (360, 700),  "name": "Забой 530"},
-    "ramp-top":  {"xy": (760, 560),  "name": "Выезд из карьера"},
-    "junction":  {"xy": (1040, 560), "name": "Развязка"},
-    "crusher":   {"xy": (1420, 400), "name": "Дробилка"},
-    "stockpile": {"xy": (1340, 640), "name": "Рудный склад"},
-    "dump":      {"xy": (1160, 960), "name": "Отвал"},
-    "fuel":      {"xy": (900, 360),  "name": "АЗС"},
+    "shaft-cage":   {"xy": (80, 300),  "name": "Клетевой ствол (свежая струя, люди)", "kind": "shaft"},
+    "shaft-skip":   {"xy": (80, 380),  "name": "Скиповой ствол (свежая струя, руда)", "kind": "shaft"},
+    "shaft-vent":   {"xy": (900, 60),  "name": "Вентиляционный ствол (ВГП, исходящая)", "kind": "shaft"},
+    "j-main-1":     {"xy": (240, 340), "name": "Главный штрек, сопряжение 1", "kind": "junction"},
+    "j-main-2":     {"xy": (480, 340), "name": "Главный штрек, сопряжение 2", "kind": "junction"},
+    "j-main-3":     {"xy": (720, 340), "name": "Главный штрек, сопряжение 3", "kind": "junction"},
+    "p1-in":        {"xy": (240, 250), "name": "Панель П-1, вход", "kind": "junction"},
+    "p1-out":       {"xy": (240, 110), "name": "Панель П-1, исходящая", "kind": "junction"},
+    "p2-in":        {"xy": (480, 250), "name": "Панель П-2, вход", "kind": "junction"},
+    "p2-out":       {"xy": (480, 110), "name": "Панель П-2, исходящая", "kind": "junction"},
+    "p3-in":        {"xy": (720, 250), "name": "Панель П-3, вход", "kind": "junction"},
+    "p3-out":       {"xy": (720, 110), "name": "Панель П-3, исходящая", "kind": "junction"},
+    "j-vent-1":     {"xy": (240, 60),  "name": "Вентиляционный штрек, 1", "kind": "junction"},
+    "j-vent-2":     {"xy": (480, 60),  "name": "Вентиляционный штрек, 2", "kind": "junction"},
+    "j-vent-3":     {"xy": (720, 60),  "name": "Вентиляционный штрек, 3", "kind": "junction"},
+    "crusher":      {"xy": (160, 440), "name": "Подземная дробилка и бункер скипового подъёма", "kind": "crusher"},
 }
 
-SEGMENTS = [
-    # id, from, to, length m, grade % (positive = climbing from -> to), polyline
-    {"id": "road-ramp-west", "a": "face-545", "b": "ramp-top", "length_m": 1250, "grade_pct": 8.0,
-     "polyline": [(300, 440), (420, 400), (560, 430), (620, 520), (760, 560)]},
-    {"id": "road-ramp-east", "a": "face-530", "b": "ramp-top", "length_m": 1650, "grade_pct": 8.0,
-     "polyline": [(360, 700), (520, 760), (660, 700), (700, 620), (760, 560)]},
-    {"id": "road-bench-link", "a": "face-545", "b": "face-530", "length_m": 520, "grade_pct": -3.0,
-     "polyline": [(300, 440), (250, 560), (300, 660), (360, 700)]},
-    {"id": "road-main", "a": "ramp-top", "b": "junction", "length_m": 300, "grade_pct": 0.0,
-     "polyline": [(760, 560), (1040, 560)]},
-    {"id": "road-crusher", "a": "junction", "b": "crusher", "length_m": 520, "grade_pct": 1.0,
-     "polyline": [(1040, 560), (1200, 470), (1420, 400)]},
-    {"id": "road-stockpile", "a": "junction", "b": "stockpile", "length_m": 340, "grade_pct": 0.0,
-     "polyline": [(1040, 560), (1200, 620), (1340, 640)]},
-    {"id": "road-dump", "a": "junction", "b": "dump", "length_m": 480, "grade_pct": 2.0,
-     "polyline": [(1040, 560), (1080, 760), (1160, 960)]},
-    {"id": "road-fuel", "a": "ramp-top", "b": "fuel", "length_m": 260, "grade_pct": 0.0,
-     "polyline": [(760, 560), (820, 440), (900, 360)]},
+# Выработки: сечение A (м2), периметр P (м), длина L (м) по плану. "kind":
+# главная / панельная / панель / сбойка. "door": регулятор или вентиляционная дверь.
+AIRWAYS = [
+    {"id": "aw-cage-main", "a": "shaft-cage", "b": "j-main-1", "L": 165, "A": 14.0, "P": 15.0, "kind": "главный", "name": "Квершлаг от клетевого ствола"},
+    {"id": "aw-skip-main", "a": "shaft-skip", "b": "j-main-1", "L": 165, "A": 14.0, "P": 15.0, "kind": "главный", "name": "Квершлаг от скипового ствола"},
+    {"id": "aw-main-12",   "a": "j-main-1", "b": "j-main-2", "L": 240, "A": 16.0, "P": 16.0, "kind": "главный", "name": "Главный откаточный штрек, 1–2"},
+    {"id": "aw-main-23",   "a": "j-main-2", "b": "j-main-3", "L": 240, "A": 16.0, "P": 16.0, "kind": "главный", "name": "Главный откаточный штрек, 2–3"},
+    {"id": "aw-p1-ort",    "a": "j-main-1", "b": "p1-in",  "L": 90, "A": 12.0, "P": 14.0, "kind": "панельный", "name": "Орт в панель П-1"},
+    {"id": "aw-p2-ort",    "a": "j-main-2", "b": "p2-in",  "L": 90, "A": 12.0, "P": 14.0, "kind": "панельный", "name": "Орт в панель П-2"},
+    {"id": "aw-p3-ort",    "a": "j-main-3", "b": "p3-in",  "L": 90, "A": 12.0, "P": 14.0, "kind": "панельный", "name": "Орт в панель П-3"},
+    {"id": "aw-p1-panel",  "a": "p1-in",  "b": "p1-out", "L": 140, "A": 40.0, "P": 36.0, "kind": "панель", "name": "Панель П-1, камеры", "panel": "panel-1"},
+    {"id": "aw-p2-panel",  "a": "p2-in",  "b": "p2-out", "L": 140, "A": 40.0, "P": 36.0, "kind": "панель", "name": "Панель П-2, камеры", "panel": "panel-2"},
+    {"id": "aw-p3-panel",  "a": "p3-in",  "b": "p3-out", "L": 140, "A": 40.0, "P": 36.0, "kind": "панель", "name": "Панель П-3, камеры", "panel": "panel-3"},
+    {"id": "aw-p1-vent",   "a": "p1-out", "b": "j-vent-1", "L": 50, "A": 12.0, "P": 14.0, "kind": "панельный", "name": "Вентиляционный орт П-1 (регулятор)", "door": "regulator"},
+    {"id": "aw-p2-vent",   "a": "p2-out", "b": "j-vent-2", "L": 50, "A": 12.0, "P": 14.0, "kind": "панельный", "name": "Вентиляционный орт П-2 (регулятор)", "door": "regulator"},
+    {"id": "aw-p3-vent",   "a": "p3-out", "b": "j-vent-3", "L": 50, "A": 12.0, "P": 14.0, "kind": "панельный", "name": "Вентиляционный орт П-3 (регулятор)", "door": "regulator"},
+    {"id": "aw-vent-12",   "a": "j-vent-1", "b": "j-vent-2", "L": 240, "A": 14.0, "P": 15.0, "kind": "главный", "name": "Вентиляционный штрек, 1–2"},
+    {"id": "aw-vent-23",   "a": "j-vent-2", "b": "j-vent-3", "L": 240, "A": 14.0, "P": 15.0, "kind": "главный", "name": "Вентиляционный штрек, 2–3"},
+    {"id": "aw-vent-shaft","a": "j-vent-3", "b": "shaft-vent", "L": 180, "A": 16.0, "P": 16.0, "kind": "главный", "name": "Вентиляционный квершлаг к стволу"},
+    # сбойка главный штрек — вентиляционный штрек с вентиляционной дверью (в норме закрыта):
+    {"id": "aw-door-3",    "a": "j-main-3", "b": "j-vent-3", "L": 280, "A": 12.0, "P": 14.0, "kind": "сбойка", "name": "Сбойка 3 с вентиляционной дверью", "door": "door"},
+    {"id": "aw-crusher",   "a": "j-main-1", "b": "crusher", "L": 130, "A": 14.0, "P": 15.0, "kind": "главный", "name": "Штрек к дробилке (тупиковый)", "dead_end": True},
 ]
 
-FACE_OF_BENCH = {"bench-545": "face-545", "bench-530": "face-530"}
+# Панели: сетка камер (cols × rows) на сетке 20 м, левый верхний угол в плане.
+PANELS = [
+    {"id": "panel-1", "name": "Панель П-1", "origin": (180, 150), "cols": 6, "rows": 3, "in": "p1-in", "out": "p1-out",
+     "ore_pass": "rs-1", "seismic_class": "a", "progress": 0.45},
+    {"id": "panel-2", "name": "Панель П-2", "origin": (420, 150), "cols": 6, "rows": 3, "in": "p2-in", "out": "p2-out",
+     "ore_pass": "rs-2", "seismic_class": "a", "progress": 0.10},
+    {"id": "panel-3", "name": "Панель П-3", "origin": (660, 150), "cols": 6, "rows": 3, "in": "p3-in", "out": "p3-out",
+     "ore_pass": "rs-3", "seismic_class": "b", "progress": 0.75},
+]
+ORE_PASSES = {"rs-1": {"xy": (300, 232), "panel": "panel-1"}, "rs-2": {"xy": (540, 232), "panel": "panel-2"},
+              "rs-3": {"xy": (780, 232), "panel": "panel-3"}}
+MAP_EXTENT = {"w": 980, "h": 500}
+LAYERS_PER_CHAMBER = 2           # два слоя по 4,5 м = 9 м; третий слой делает целики критическими (SF ≈ 1,05), см. sim.py
 
-# ---------------------------------------------------------------------------
-# Processing plant
-#   Primary gyratory crusher 1 000 t/h rated (FLSmidth/Metso 54-75 class for a
-#   ~25 kt/d plant); feed F80 400 mm -> product P80 150 mm.
-#   SAG + ball milling to P80 150 um; flotation recovery 85-90 % at 0.4 % Cu
-#   feed, falling at low grades (typical porphyry Cu metallurgy, Kaggle
-#   "Quality Prediction in a Mining Process" shows the same grade/recovery
-#   sensitivity); concentrate 24 % Cu.
-#   Comminution energy by Bond's law: W = 10 Wi (1/sqrt(P80) - 1/sqrt(F80)),
-#   kWh/t with sizes in micrometres (Bond, 1952).
-# ---------------------------------------------------------------------------
-CRUSHER = {"rated_tph": 1000.0, "f80_um": 400_000.0, "p80_um": 150_000.0, "no_load_kw": 150.0, "bin_capacity_t": 600.0}
-MILL = {"rated_tph": 1000.0, "f80_um": 150_000.0, "p80_um": 150.0, "no_load_kw": 1200.0}
-FLOTATION = {"base_recovery": 0.89, "grade_knee": 0.30, "recovery_at_floor": 0.70, "concentrate_grade": 24.0,
-             "hardness_penalty_per_kwh": 0.004}  # recovery drops 0.4 % per kWh/t above 14 (coarser grind)
-BLEND = {"target_grade": 0.42, "band": 0.08}    # keep crusher feed in 0.34-0.50 % Cu (ASSUMPTION: plant design range)
-STOCKPILE = {"capacity_t": 60_000.0, "reclaim_tph": 300.0, "initial_t": 12_000.0, "initial_grade": 0.31}
-
-# ---------------------------------------------------------------------------
-# Power
-#   Site base load (lighting, pumps, workshops) 1.5 MW; substation rated 20 MVA
-#   (ASSUMPTION). Energy consumption profiles of a real mining and processing
-#   plant (Zenodo 20647907, CC BY-SA 4.0) show the same order: 10-20 MW with a
-#   mill-dominated share.
-# ---------------------------------------------------------------------------
-POWER = {"base_kw": 1500.0, "substation_mva": 20.0, "diesel_kwh_per_l": 10.0, "diesel_co2_kg_per_l": 2.68,
-         "grid_co2_kg_per_kwh": 0.62}  # KZ grid, coal-heavy, ~0.6 kg CO2/kWh (IEA)
-
-# ---------------------------------------------------------------------------
-# Maintenance / reliability (module 07)
-#   Mean time between failures and repair durations for 777-class trucks and
-#   hydraulic shovels are ASSUMPTIONS in the range reported for open-pit
-#   fleets (MTBF 60-150 h, MTTR 2-8 h; OpenMines uses lambda_repair 0.0083
-#   per minute and 50-minute repairs for road events).
-# ---------------------------------------------------------------------------
-RELIABILITY = {
-    "truck": {"mtbf_h": 110.0, "mttr_h": 3.0, "service_interval_h": 250.0, "service_h": 6.0},
-    "excavator": {"mtbf_h": 150.0, "mttr_h": 5.0, "service_interval_h": 500.0, "service_h": 10.0},
-}
+# Датчики аэрогазового контроля (стационарные): где стоят.
+SENSORS = [
+    {"id": "agk-main-1", "node": "j-main-1", "name": "АГК, главный штрек 1"},
+    {"id": "agk-p1", "node": "p1-out", "name": "АГК, исходящая П-1"},
+    {"id": "agk-p2", "node": "p2-out", "name": "АГК, исходящая П-2"},
+    {"id": "agk-p3", "node": "p3-out", "name": "АГК, исходящая П-3"},
+    {"id": "agk-vent", "node": "j-vent-3", "name": "АГК, общая исходящая"},
+]

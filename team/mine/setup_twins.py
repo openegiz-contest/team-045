@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create or update every Sarybulak twin in Ditto (idempotent PUT, parents first)."""
+"""Создать или обновить все двойники горизонта ВЖР в Ditto (идемпотентные PUT, родители первыми)."""
 
 import base64
 import json

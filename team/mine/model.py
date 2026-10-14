@@ -1,14 +1,13 @@
 """
-Static model of the Sarybulak mine: the objects that become twins in Ditto.
+Статическая модель горизонта ВЖР: объекты, которые становятся двойниками Ditto.
 
-build_twins() returns an ordered dict {thingId: thing body}. Parents come
-before children so the hierarchy attribute `_parents` always points to an
-existing twin. Attributes hold what does not change (geometry, ratings,
-data-sheet parameters); features hold what the simulator updates.
+build_twins() возвращает упорядоченный словарь {thingId: тело вещи}. Родители
+идут раньше детей, чтобы `_parents` всегда указывал на существующий двойник.
+Атрибуты — то, что не меняется (геометрия, паспорта, нормы); features — то,
+что обновляет симулятор.
 """
 
 import math
-import random
 from collections import OrderedDict
 
 from . import config as C
@@ -20,202 +19,219 @@ def tid(name):
     return f"{C.NAMESPACE}:{name}"
 
 
-def grade_at(x, y, rng):
-    """Smooth ore-body bulge plus noise; deterministic per block (seeded)."""
-    dx, dy = x - C.GRADE_CENTER[0], y - C.GRADE_CENTER[1]
-    r = math.hypot(dx, dy) / C.GRADE_RADIUS
-    g = C.GRADE_FLOOR + (C.GRADE_PEAK - C.GRADE_FLOOR) * math.exp(-r * r)
-    g *= rng.uniform(0.75, 1.25)
-    return round(max(0.05, g), 3)
-
-
-def build_blocks():
-    """Block model: one block = 25 x 25 x 15 m, ~25 300 t."""
-    rng = random.Random(7)
-    blocks = []
-    for bench in C.BENCHES:
-        ox, oy = bench["origin"]
-        for row in range(bench["rows"]):
-            for col in range(bench["cols"]):
-                x = ox + col * C.BLOCK_SIZE_M + C.BLOCK_SIZE_M / 2
-                y = oy + row * C.BLOCK_SIZE_M + C.BLOCK_SIZE_M / 2
-                g = grade_at(x, y, rng)
-                blocks.append({
-                    "id": f"block-{bench['elevation']}-{row + 1}{chr(ord('A') + col)}",
-                    "bench": bench["id"],
-                    "elevation": bench["elevation"],
-                    "x": x, "y": y, "row": row, "col": col,
-                    "grade": g,
-                    "hardness": round(rng.uniform(C.HARDNESS_MIN, C.HARDNESS_MAX), 1),
-                    "tonnes": round(C.BLOCK_TONNES),
-                    "is_ore": g >= C.CUTOFF_GRADE,
-                })
-    return blocks
-
-
-def feature(value, unit=None):
+def f(value, unit=None):
     p = {"value": value}
     if unit:
         p["unit"] = unit
     return {"properties": p}
 
 
+def airway_resistance(aw):
+    """Сопротивление Аткинсона R = α·P·L / A³, Н·с²/м⁸."""
+    return C.FAN["alpha"] * aw["P"] * aw["L"] / (aw["A"] ** 3)
+
+
+def build_chambers():
+    """Камеры и целики панелей на сетке 20 м. Начальное состояние по progress панели."""
+    chambers, pillars = [], []
+    for panel in C.PANELS:
+        ox, oy = panel["origin"]
+        n = panel["cols"] * panel["rows"]
+        done = int(round(panel["progress"] * n * C.LAYERS_PER_CHAMBER))   # отработанных слоёв в панели
+        idx = 0
+        for row in range(panel["rows"]):
+            for col in range(panel["cols"]):
+                cx = ox + col * C.GRID_M
+                cy = oy + row * C.GRID_M
+                cid = f"{panel['id'].replace('panel-', 'k')}-{row + 1}{col + 1}"       # k1-11 … k3-36
+                layers_done = min(C.LAYERS_PER_CHAMBER, max(0, done - idx * C.LAYERS_PER_CHAMBER))
+                idx += 1
+                state = "mined_out" if layers_done >= C.LAYERS_PER_CHAMBER else ("idle" if layers_done > 0 else "virgin")
+                chambers.append({
+                    "id": cid, "panel": panel["id"], "x": cx, "y": cy, "w": C.CHAMBER_W, "l": C.CHAMBER_L,
+                    "row": row, "col": col, "layer": layers_done, "state": state,
+                    "grade": round(C.ORE_GRADE_PCT * (0.85 + 0.3 * ((col * 7 + row * 3) % 5) / 4), 2),
+                })
+                pillars.append({
+                    "id": cid.replace("k", "c", 1),          # c1-11: целик при камере k1-11
+                    "panel": panel["id"], "chamber": cid,
+                    "x": cx + C.CHAMBER_W, "y": cy + (C.GRID_M - C.PILLAR_W) / 2, "w": C.PILLAR_W,
+                    "h": C.LAYER_H * max(1, layers_done),
+                    "edge": col == 0 or col == panel["cols"] - 1 or row == 0 or row == panel["rows"] - 1,
+                })
+    return chambers, pillars
+
+
+def pillar_strength_mpa(w, h):
+    """Хедли–Грант: S = K · w^0.5 / h^0.75."""
+    return C.PILLAR_K_MPA * math.sqrt(w) / (h ** 0.75)
+
+
+def pillar_stress_mpa(extraction):
+    """Теория площадей влияния: σ = ρ g H / (1 − e)."""
+    sigma_v = C.ROCK_DENSITY * 1000 * 9.81 * C.DEPTH_M / 1e6
+    return sigma_v / max(0.05, 1.0 - extraction)
+
+
 def build_twins():
     twins = OrderedDict()
     mine = tid(C.MINE_ID)
-
     twins[mine] = {
         "policyId": POLICY,
-        "attributes": {
-            "name": "Карьер Сарыбұлақ (медно-порфировое месторождение)",
-            "kind": "mine", "_isType": False,
-            "cutoff_grade_pct": C.CUTOFF_GRADE,
-            "blend_target_pct": C.BLEND["target_grade"], "blend_band_pct": C.BLEND["band"],
-            "map_extent": {"w": 1700, "h": 1100},
-        },
-        "features": {
-            "sim_time_h": feature(0, "h"),
-            "ore_mined_t": feature(0, "t"),
-            "waste_mined_t": feature(0, "t"),
-            "strip_ratio": feature(0, "t/t"),
-            "concentrate_t": feature(0, "t"),
-            "copper_in_concentrate_t": feature(0, "t Cu"),
-            "trucks_active": feature(0, "trucks"),
-            "fleet_availability_pct": feature(100, "%"),
-            "active_scenarios": feature(""),
-        },
+        "attributes": {"name": C.MINE_NAME, "kind": "mine", "_isType": False, "depth_m": C.DEPTH_M,
+                       "system": "камерно-столбовая, слоевая выемка", "map_extent": C.MAP_EXTENT,
+                       "norms": {"air_per_person_m3min": C.AIR["per_person_m3min"], "air_per_kw_m3min": C.AIR["per_diesel_kw_m3min"],
+                                 "co_limit_pct": C.AIR["co_limit_pct"], "no2_limit_pct": C.AIR["no2_limit_pct"],
+                                 "t_max_c": C.AIR["t_max_c"], "sf_ok": C.SF_OK, "sf_watch": C.SF_WATCH,
+                                 "blast_reentry_min": C.AIR["blast_reentry_min"]}},
+        "features": {"sim_time_h": f(0, "ч"), "shift_no": f(1), "shift_phase": f("работа"),
+                     "people_underground": f(0, "чел"), "ore_hoisted_t": f(0, "т"), "ore_shift_t": f(0, "т"),
+                     "chambers_allowed": f(0), "chambers_restricted": f(0), "chambers_forbidden": f(0),
+                     "alarm": f("нет"), "active_scenarios": f("none")},
     }
 
-    # Facilities (nodes) ----------------------------------------------------
-    facility_kind = {"crusher": "crusher", "stockpile": "stockpile", "dump": "waste-dump", "fuel": "fuel-station",
-                     "ramp-top": "junction", "junction": "junction", "face-545": "face", "face-530": "face"}
-    for node_id, node in C.NODES.items():
-        kind = facility_kind[node_id]
-        attrs = {"name": node["name"], "kind": kind, "_isType": False, "_parents": mine,
+    # Вентилятор главного проветривания --------------------------------------
+    twins[tid("fan-main")] = {
+        "policyId": POLICY,
+        "attributes": {"name": C.FAN["name"], "kind": "fan", "_isType": False, "_parents": mine,
+                       "q_nominal_m3s": C.FAN["q_nominal_m3s"], "p_nominal_pa": C.FAN["p_nominal_pa"],
+                       "power_kw": C.FAN["power_kw"], "node": "shaft-vent", "x": C.NODES["shaft-vent"]["xy"][0], "y": C.NODES["shaft-vent"]["xy"][1]},
+        "features": {"state": f("работает"), "speed_pct": f(100, "%"), "q": f(0, "м3/с"), "pressure": f(0, "Па"),
+                     "power": f(0, "кВт")},
+    }
+
+    # Узлы сети (стволы, сопряжения, дробилка) ----------------------------------
+    for nid, node in C.NODES.items():
+        attrs = {"name": node["name"], "kind": node["kind"], "_isType": False, "_parents": mine,
                  "x": node["xy"][0], "y": node["xy"][1]}
-        feats = {}
-        if kind == "crusher":
-            attrs.update({"rated_tph": C.CRUSHER["rated_tph"], "f80_mm": C.CRUSHER["f80_um"] / 1000,
-                          "p80_mm": C.CRUSHER["p80_um"] / 1000, "bin_capacity_t": C.CRUSHER["bin_capacity_t"]})
-            feats = {"state": feature("idle"), "throughput": feature(0, "t/h"), "feed_grade": feature(0, "% Cu"),
-                     "bin_level": feature(0, "t"), "power": feature(0, "kW"), "tonnes_total": feature(0, "t"),
-                     "queue": feature(0, "trucks")}
-        elif kind == "stockpile":
-            attrs.update({"capacity_t": C.STOCKPILE["capacity_t"], "reclaim_tph": C.STOCKPILE["reclaim_tph"]})
-            feats = {"tonnes": feature(C.STOCKPILE["initial_t"], "t"), "grade": feature(C.STOCKPILE["initial_grade"], "% Cu"),
-                     "reclaiming": feature(0, "t/h"), "queue": feature(0, "trucks")}
-        elif kind == "waste-dump":
-            feats = {"tonnes": feature(0, "t"), "queue": feature(0, "trucks")}
-        elif kind == "fuel-station":
-            attrs.update({"rate_lpm": C.TRUCK["refuel_rate_lpm"]})
-            feats = {"diesel_issued_l": feature(0, "L"), "queue": feature(0, "trucks")}
-        elif kind == "face":
-            feats = {"queue": feature(0, "trucks")}
-        twins[tid(node_id)] = {"policyId": POLICY, "attributes": attrs, "features": feats}
+        feats = {"people": f(0, "чел")}
+        if node["kind"] == "crusher":
+            attrs["rated_tph"] = C.CRUSHER_TPH
+            feats.update({"state": f("ожидание"), "throughput": f(0, "т/ч"), "bunker": f(0, "т"), "tonnes_total": f(0, "т")})
+        if node["kind"] == "shaft":
+            feats.update({"q": f(0, "м3/с"), "mode": f("свежая" if nid != "shaft-vent" else "исходящая")})
+        twins[tid(nid)] = {"policyId": POLICY, "attributes": attrs, "features": feats}
 
-    # Road segments ---------------------------------------------------------
-    for seg in C.SEGMENTS:
-        twins[tid(seg["id"])] = {
-            "policyId": POLICY,
-            "attributes": {"name": f"Дорога {C.NODES[seg['a']]['name']} → {C.NODES[seg['b']]['name']}",
-                           "kind": "road", "_isType": False, "_parents": mine,
-                           "from": seg["a"], "to": seg["b"], "length_m": seg["length_m"],
-                           "grade_pct": seg["grade_pct"], "polyline": [list(p) for p in seg["polyline"]]},
-            "features": {"status": feature("open"), "trucks_on_road": feature(0, "trucks"),
-                         "trips_total": feature(0, "trips")},
-        }
-
-    # Benches and blocks ----------------------------------------------------
-    for bench in C.BENCHES:
-        twins[tid(bench["id"])] = {
-            "policyId": POLICY,
-            "attributes": {"name": f"Уступ {bench['elevation']} м", "kind": "bench", "_isType": False, "_parents": mine,
-                           "elevation_m": bench["elevation"], "origin_x": bench["origin"][0], "origin_y": bench["origin"][1],
-                           "cols": bench["cols"], "rows": bench["rows"], "block_size_m": C.BLOCK_SIZE_M,
-                           "face_node": C.FACE_OF_BENCH[bench["id"]]},
-            "features": {"blocks_mined": feature(0, "blocks"), "tonnes_remaining": feature(0, "t")},
-        }
-    for b in build_blocks():
-        twins[tid(b["id"])] = {
-            "policyId": POLICY,
-            "attributes": {"name": b["id"], "kind": "block", "_isType": False, "_parents": tid(b["bench"]),
-                           "x": b["x"], "y": b["y"], "elevation_m": b["elevation"], "size_m": C.BLOCK_SIZE_M,
-                           "grade_pct": b["grade"], "hardness_kwh_t": b["hardness"], "tonnes_insitu": b["tonnes"],
-                           "material": "ore" if b["is_ore"] else "waste"},
-            "features": {"status": feature("insitu"), "tonnes_remaining": feature(b["tonnes"], "t"),
-                         "fragmentation_p80_mm": feature(0, "mm"),
-                         "material": feature("ore" if b["is_ore"] else "waste")},
-        }
-
-    # Excavators ------------------------------------------------------------
-    for ex in C.EXCAVATORS:
-        twins[tid(ex["id"])] = {
-            "policyId": POLICY,
-            "attributes": {"name": ex["name"], "kind": "excavator", "_isType": False, "_parents": mine,
-                           "bench": tid(ex["bench"]), "bucket_t": ex["bucket_t"], "pass_s": ex["pass_s"],
-                           "mtbf_h": C.RELIABILITY["excavator"]["mtbf_h"]},
-            "features": {"state": feature("idle"), "block": feature(""), "face_grade": feature(0, "% Cu"),
-                         "passes_total": feature(0, "passes"), "tonnes_loaded": feature(0, "t"),
-                         "queue": feature(0, "trucks"), "utilization_pct": feature(0, "%"),
-                         "hours": feature(0, "h"), "health_pct": feature(100, "%")},
-        }
-
-    # Trucks ----------------------------------------------------------------
-    for i in range(1, C.TRUCK_COUNT + 1):
-        twins[tid(f"truck-{i:02d}")] = {
-            "policyId": POLICY,
-            "attributes": {"name": f"Самосвал HT-{i:02d} ({C.TRUCK['model']})", "kind": "haul-truck", "_isType": False,
-                           "_parents": mine, "capacity_t": C.TRUCK["capacity_t"], "tank_l": C.TRUCK["tank_l"],
-                           "model": C.TRUCK["model"]},
-            "features": {"state": feature("idle"), "x": feature(0, "m"), "y": feature(0, "m"),
-                         "road": feature(""), "destination": feature(""), "payload": feature(0, "t"),
-                         "material": feature(""), "load_grade": feature(0, "% Cu"), "speed": feature(0, "km/h"),
-                         "fuel": feature(C.TRUCK["tank_l"], "L"), "fuel_rate": feature(0, "L/h"),
-                         "trips_total": feature(0, "trips"), "hours": feature(0, "h"),
-                         "health_pct": feature(100, "%"), "assigned_excavator": feature("")},
-        }
-
-    # Plant -----------------------------------------------------------------
-    plant = tid("plant")
-    twins[plant] = {
+    twins[tid("hoist")] = {
         "policyId": POLICY,
-        "attributes": {"name": "Обогатительная фабрика", "kind": "plant", "_isType": False, "_parents": mine,
-                       "x": 1560, "y": 300},
-        "features": {"state": feature("running")},
+        "attributes": {"name": "Скиповой подъём", "kind": "hoist", "_isType": False, "_parents": tid("shaft-skip"),
+                       "rated_tph": C.HOIST_TPH},
+        "features": {"state": f("ожидание"), "throughput": f(0, "т/ч"), "tonnes_total": f(0, "т"), "skips_total": f(0)},
     }
-    twins[tid("mill")] = {
+
+    # Выработки (ветви вентиляционной сети) ------------------------------------
+    for aw in C.AIRWAYS:
+        a, b = C.NODES[aw["a"]]["xy"], C.NODES[aw["b"]]["xy"]
+        twins[tid(aw["id"])] = {
+            "policyId": POLICY,
+            "attributes": {"name": aw["name"], "kind": "airway", "_isType": False, "_parents": mine,
+                           "from": aw["a"], "to": aw["b"], "length_m": aw["L"], "area_m2": aw["A"], "perimeter_m": aw["P"],
+                           "resistance": round(airway_resistance(aw), 5), "airway_kind": aw["kind"],
+                           "door": aw.get("door", ""), "panel": aw.get("panel", ""), "dead_end": aw.get("dead_end", False),
+                           "polyline": [list(a), list(b)]},
+            "features": {"status": f("open"), "q": f(0, "м3/с"), "velocity": f(0, "м/с"), "direction": f(1),
+                         "co": f(0, "% об."), "no2": f(0, "% об."), "temp": f(C.AIR["rock_temp_c"], "°C"),
+                         "door_state": f("закрыта" if aw.get("door") == "door" else ("открыт" if aw.get("door") else "")),
+                         "people": f(0, "чел"), "vehicles": f(0)},
+        }
+
+    # Датчики аэрогазового контроля -------------------------------------------
+    for s in C.SENSORS:
+        xy = C.NODES[s["node"]]["xy"]
+        twins[tid(s["id"])] = {
+            "policyId": POLICY,
+            "attributes": {"name": s["name"], "kind": "sensor", "_isType": False, "_parents": tid(s["node"]),
+                           "node": s["node"], "x": xy[0], "y": xy[1] + 14,
+                           "limits": {"co_pct": C.AIR["co_limit_pct"], "no2_pct": C.AIR["no2_limit_pct"], "t_max_c": C.AIR["t_max_c"]}},
+            "features": {"co": f(0, "% об."), "no2": f(0, "% об."), "co2": f(0.1, "% об."), "o2": f(20.9, "% об."),
+                         "temp": f(C.AIR["rock_temp_c"], "°C"), "velocity": f(0, "м/с"), "alarm": f("норма")},
+        }
+
+    # Панели, камеры, целики, рудоспуски ---------------------------------------
+    chambers, pillars = build_chambers()
+    for panel in C.PANELS:
+        twins[tid(panel["id"])] = {
+            "policyId": POLICY,
+            "attributes": {"name": panel["name"], "kind": "panel", "_isType": False, "_parents": mine,
+                           "origin_x": panel["origin"][0], "origin_y": panel["origin"][1], "cols": panel["cols"], "rows": panel["rows"],
+                           "grid_m": C.GRID_M, "in_node": panel["in"], "out_node": panel["out"], "ore_pass": panel["ore_pass"],
+                           "seismic_class_initial": panel["seismic_class"]},
+            "features": {"q_in": f(0, "м3/с"), "chambers_active": f(0), "people": f(0, "чел"), "diesel_kw": f(0, "кВт"),
+                         "air_required": f(0, "м3/мин"), "air_available": f(0, "м3/мин"),
+                         "seismic_class": f(panel["seismic_class"]), "bumps_shift": f(0), "seismic_energy_shift": f(0, "Дж"),
+                         "max_bump_energy": f(0, "Дж"), "hazard": f("низкая"), "evacuated_until_h": f(0, "ч"),
+                         "extraction_ratio": f(C.EXTRACTION_RATIO), "layers_mined": f(0), "status": f("работа")},
+        }
+        rs = panel["ore_pass"]
+        twins[tid(rs)] = {
+            "policyId": POLICY,
+            "attributes": {"name": f"Рудоспуск {rs.upper()}", "kind": "ore-pass", "_isType": False, "_parents": tid(panel["id"]),
+                           "x": C.ORE_PASSES[rs]["xy"][0], "y": C.ORE_PASSES[rs]["xy"][1], "capacity_t": C.ORE_PASS_CAPACITY_T},
+            "features": {"level": f(0, "т"), "state": f("ожидание"), "tonnes_total": f(0, "т")},
+        }
+    for ch in chambers:
+        twins[tid(ch["id"])] = {
+            "policyId": POLICY,
+            "attributes": {"name": f"Камера {ch['id'][1:]}", "kind": "chamber", "_isType": False, "_parents": tid(ch["panel"]),
+                           "x": ch["x"], "y": ch["y"], "w": ch["w"], "l": ch["l"], "layer_h": C.LAYER_H, "layers": C.LAYERS_PER_CHAMBER,
+                           "tonnes_per_layer": round(C.CHAMBER_TONNES), "grade_pct": ch["grade"], "volume_m3": round(C.CHAMBER_VOLUME)},
+            "features": {"state": f(ch["state"]), "layer": f(ch["layer"]), "tonnes_remaining": f(round(C.CHAMBER_TONNES) if ch["state"] != "mined_out" else 0, "т"),
+                         "crew": f(""), "equipment": f(""), "people": f(0, "чел"), "diesel_kw": f(0, "кВт"),
+                         "air": f(0, "м3/мин"), "air_required": f(0, "м3/мин"), "co": f(0, "% об."), "no2": f(0, "% об."),
+                         "temp": f(C.AIR["rock_temp_c"], "°C"), "aux_fan": f("выкл"),
+                         "verdict": f("—"), "reason": f(""), "reentry_in": f(0, "мин"), "stage_progress": f(0, "%")},
+        }
+    for p in pillars:
+        extraction = C.EXTRACTION_RATIO * (0.9 if p["edge"] else 1.0)
+        strength = pillar_strength_mpa(p["w"], p["h"])
+        stress = pillar_stress_mpa(extraction)
+        twins[tid(p["id"])] = {
+            "policyId": POLICY,
+            "attributes": {"name": f"Целик {p['id'][1:]}", "kind": "pillar", "_isType": False, "_parents": tid(p["panel"]),
+                           "chamber": p["chamber"], "x": p["x"], "y": p["y"], "w": p["w"], "edge": p["edge"],
+                           "k_mpa": round(C.PILLAR_K_MPA, 1), "formula": "Hedley–Grant S=K·w^0.5/h^0.75; σ=ρgH/(1−e)"},
+            "features": {"height": f(p["h"], "м"), "strength": f(round(strength, 1), "МПа"), "stress": f(round(stress, 1), "МПа"),
+                         "sf": f(round(strength / stress, 2)), "convergence": f(0.2, "мм/сут"), "status": f("устойчив"),
+                         "extracted": f(False)},
+        }
+
+    # Люди и техника ----------------------------------------------------------
+    for crew in C.CREWS:
+        twins[tid(crew)] = {
+            "policyId": POLICY,
+            "attributes": {"name": f"Звено {crew.split('-')[1]} ({C.CREW_SIZE} чел.)", "short": f"звено-{crew.split('-')[1]}", "kind": "crew", "_isType": False, "_parents": mine,
+                           "size": C.CREW_SIZE},
+            "features": {"chamber": f(""), "task": f(""), "state": f("на поверхности"), "people": f(C.CREW_SIZE, "чел"),
+                         "x": f(C.NODES["shaft-cage"]["xy"][0], "м"), "y": f(C.NODES["shaft-cage"]["xy"][1], "м"), "exposure_co": f(0, "%·ч")},
+        }
+    for i, lhd in enumerate(C.LHDS):
+        twins[tid(lhd)] = {
+            "policyId": POLICY,
+            "attributes": {"name": f"ПДМ-{i + 1} ({C.LHD['model']})", "kind": "lhd", "_isType": False, "_parents": mine,
+                           "kw": C.LHD["kw"], "bucket_t": C.LHD["bucket_t"]},
+            "features": {"chamber": f(""), "state": f("стоянка"), "kw_running": f(0, "кВт"), "tonnes_shift": f(0, "т"),
+                         "buckets_total": f(0), "hours": f(0, "ч"), "x": f(C.NODES["j-main-1"]["xy"][0], "м"), "y": f(C.NODES["j-main-1"]["xy"][1] + 20 * i, "м")},
+        }
+    for i, jb in enumerate(C.JUMBOS):
+        twins[tid(jb)] = {
+            "policyId": POLICY,
+            "attributes": {"name": f"СБУ-{i + 1} ({C.JUMBO['model']})", "kind": "jumbo", "_isType": False, "_parents": mine,
+                           "kw_tramming": C.JUMBO["kw_tramming"]},
+            "features": {"chamber": f(""), "state": f("стоянка"), "kw_running": f(0, "кВт"), "rounds_total": f(0),
+                         "x": f(C.NODES["j-main-2"]["xy"][0], "м"), "y": f(C.NODES["j-main-2"]["xy"][1] + 20 * i, "м")},
+        }
+
+    # Наряд смены -------------------------------------------------------------
+    twins[tid("shift-plan")] = {
         "policyId": POLICY,
-        "attributes": {"name": "Измельчение (SAG + шаровая)", "kind": "mill", "_isType": False, "_parents": plant,
-                       "rated_tph": C.MILL["rated_tph"], "p80_um": C.MILL["p80_um"]},
-        "features": {"state": feature("idle"), "throughput": feature(0, "t/h"), "feed_grade": feature(0, "% Cu"),
-                     "specific_energy": feature(0, "kWh/t"), "power": feature(0, "kW"), "tonnes_total": feature(0, "t")},
-    }
-    twins[tid("flotation")] = {
-        "policyId": POLICY,
-        "attributes": {"name": "Флотация", "kind": "flotation", "_isType": False, "_parents": plant,
-                       "concentrate_grade_pct": C.FLOTATION["concentrate_grade"]},
-        "features": {"recovery": feature(0, "%"), "concentrate_tph": feature(0, "t/h"),
-                     "concentrate_total": feature(0, "t"), "tailings_grade": feature(0, "% Cu")},
-    }
-    twins[tid("substation")] = {
-        "policyId": POLICY,
-        "attributes": {"name": "Подстанция 110/6 кВ", "kind": "substation", "_isType": False, "_parents": mine,
-                       "rated_mva": C.POWER["substation_mva"], "x": 1620, "y": 520},
-        "features": {"load": feature(0, "kW"), "load_pct": feature(0, "%"), "energy_total": feature(0, "kWh"),
-                     "diesel_rate": feature(0, "L/h"), "diesel_total": feature(0, "L"), "co2_total": feature(0, "t CO2")},
-    }
-    twins[tid("dispatcher")] = {
-        "policyId": POLICY,
-        "attributes": {"name": "Диспетчер", "kind": "dispatcher", "_isType": False, "_parents": mine,
-                       "policy": "min-wait + blend"},
-        "features": {"assignments": feature(""), "avg_cycle_min": feature(0, "min"),
-                     "avg_queue_min": feature(0, "min"), "blend_mode": feature("normal")},
+        "attributes": {"name": "Наряд смены (горный мастер)", "kind": "shift-plan", "_isType": False, "_parents": mine,
+                       "rule": "звено идёт в камеру только при вердикте «разрешено»; «ограничено» — без дизеля или с одной машиной"},
+        "features": {"shift_no": f(1), "plan": f(""), "auto": f(True), "last_change": f(""), "rejected": f("")},
     }
     return twins
 
 
 if __name__ == "__main__":
-    import json
+    import collections
     t = build_twins()
-    print(json.dumps(t, ensure_ascii=False, indent=1)[:3000])
-    print(len(t), "twins")
+    print(len(t), "twins", collections.Counter(v["attributes"]["kind"] for v in t.values()))

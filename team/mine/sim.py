@@ -1,952 +1,1127 @@
 """
-Sarybulak open-pit simulator: haul cycle with queues and a dispatcher, block
-model with ore control and blending, drill-and-blast preparation, crusher,
-mill and flotation, energy and diesel accounting, fleet reliability.
+Симулятор горизонта ВЖР: вентиляционная сеть (Харди–Кросс), аэрогазовый
+режим камер, горное давление и сейсмичность, цикл камеры (бурение, заряжание,
+взрыв, проветривание, оборка, крепление, выпуск), люди и техника, наряд смены
+с вердиктом по каждой камере, рудоспуски, дробилка и подъём.
 
-The simulator is pure Python with no I/O: `Mine.step(dt)` advances the state,
-`Mine.snapshot()` returns the features of every twin, `Mine.command(cmd)`
-applies a what-if scenario. run_sim.py wires it to MQTT.
+Чистый Python без ввода-вывода: Mine.step(dt), Mine.snapshot(), Mine.command().
 """
 
-import heapq
 import math
 import random
 from collections import deque
 
 from . import config as C
-from .model import build_blocks
+from .model import build_chambers, pillar_strength_mpa, pillar_stress_mpa, airway_resistance
 
-# Excavator diesel burn: Komatsu PC2000 class, 180-260 L/h digging, ~40 L/h
-# idling (Komatsu PC2000-11 spec sheet; operator fuel reports).
-EXCAVATOR_LPH = {"loading": 240.0, "idle": 40.0, "waiting": 40.0}
-
-# Drill and blast: 25 x 25 m block, 15 m bench + 1.5 m sub-drill, pattern
-# 5.5 x 6.5 m -> ~16 holes x 16.5 m = 264 m of drilling; rotary rig 25-35 m/h
-# in porphyry (Atlas Copco DM45 field data) -> ~9 h drilling + 3 h charging
-# and a blast. Fragmentation grows with hardness (Kuz-Ram trend): P80 ~ 180 mm
-# at Wi 12 to ~320 mm at Wi 18 (ASSUMPTION, order of magnitude from El Aljibe
-# drone fragmentation dataset, Zenodo 10666378: P80 150-400 mm).
-DRILL_H = 9.0
-CHARGE_H = 3.0
+R_CLOSED = 5000.0        # сопротивление закрытой двери / завала, Н·с²/м⁸ (практически непроницаемо)
+R_REGULATOR_OPEN = 0.0
+SURFACE = "surface"
 
 
-def frag_p80_mm(hardness, rng):
-    return round((180.0 + (hardness - 12.0) * 23.0) * rng.uniform(0.9, 1.1), 0)
-
-
-class Segment:
+# ============================================================ вентиляция
+class Airway:
     def __init__(self, spec):
         self.id = spec["id"]
         self.a, self.b = spec["a"], spec["b"]
-        self.length = float(spec["length_m"])
-        self.grade = float(spec["grade_pct"])
-        self.poly = [tuple(p) for p in spec["polyline"]]
-        self.open = True
-        self.trucks = 0
-        self.trips = 0
-        # cumulative drawing length along the polyline for interpolation
-        self.cum = [0.0]
-        for (x0, y0), (x1, y1) in zip(self.poly, self.poly[1:]):
-            self.cum.append(self.cum[-1] + math.hypot(x1 - x0, y1 - y0))
+        self.L, self.A = spec["L"], spec["A"]
+        self.R0 = airway_resistance(spec)
+        self.kind = spec["kind"]
+        self.door = spec.get("door", "")
+        self.panel = spec.get("panel")
+        self.dead_end = spec.get("dead_end", False)
+        self.blocked = False
+        self.door_open = self.door == "regulator"      # регулятор в норме открыт, дверь закрыта
+        self.regulator_extra = 0.0                     # дополнительное сопротивление регулятора
+        self.q = 0.0                                   # м3/с, + от a к b
+        self.co = 0.0
+        self.no2 = 0.0
+        self.temp = C.AIR["rock_temp_c"]
+        self.people = 0
+        self.vehicles = 0
 
-    def xy(self, frac, forward=True):
-        """Map a fraction of the segment length to map coordinates."""
-        if not forward:
-            frac = 1.0 - frac
-        target = max(0.0, min(1.0, frac)) * self.cum[-1]
-        for i in range(1, len(self.cum)):
-            if target <= self.cum[i] or i == len(self.cum) - 1:
-                span = self.cum[i] - self.cum[i - 1] or 1.0
-                t = (target - self.cum[i - 1]) / span
-                (x0, y0), (x1, y1) = self.poly[i - 1], self.poly[i]
-                return (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
-        return self.poly[-1]
+    @property
+    def R(self):
+        if self.blocked:
+            return R_CLOSED
+        if self.door == "door" and not self.door_open:
+            return R_CLOSED
+        if self.door == "regulator" and not self.door_open:
+            return R_CLOSED
+        return self.R0 + self.regulator_extra
+
+    @property
+    def velocity(self):
+        return abs(self.q) / self.A
 
 
-class Network:
+class VentNetwork:
+    """Сеть выработок + поверхность. Вентилятор на стволе: p = p0·(1 − (Q/Qmax)²)."""
+
     def __init__(self):
-        self.segments = {s["id"]: Segment(s) for s in C.SEGMENTS}
-        self.adj = {n: [] for n in C.NODES}
-        for s in self.segments.values():
-            self.adj[s.a].append((s.b, s, True))
-            self.adj[s.b].append((s.a, s, False))
+        self.airways = {a["id"]: Airway(a) for a in C.AIRWAYS}
+        # стволы: поверхность — узел ствола, малое сопротивление
+        for sid in ("shaft-cage", "shaft-skip", "shaft-vent"):
+            self.airways[f"shaft:{sid}"] = Airway({"id": f"shaft:{sid}", "a": SURFACE, "b": sid, "L": C.DEPTH_M, "A": 20.0, "P": 16.0, "kind": "ствол"})
+        self.fan_speed = 1.0      # доля номинала
+        self.fan_on = True
+        self.fan_q = 0.0
+        self.fan_p = 0.0
+        self.nodes = set()
+        for aw in self.airways.values():
+            self.nodes.update((aw.a, aw.b))
+        self.meshes = self._find_meshes()
 
-    @staticmethod
-    def speed_kmh(loaded, grade_in_direction):
-        t = C.TRUCK
-        if abs(grade_in_direction) < 2.0:
-            return t["speed_loaded_flat_kmh"] if loaded else t["speed_empty_flat_kmh"]
-        if grade_in_direction > 0:  # climbing
-            return t["speed_loaded_ramp_kmh"] if loaded else t["speed_empty_ramp_kmh"] + 4.0
-        return 20.0 if loaded else t["speed_empty_ramp_kmh"]  # descending, retarder-limited
+    def _find_meshes(self):
+        """Базовые циклы: остовное дерево из ветвей с наименьшим сопротивлением (Краскал),
+        остальные ветви — хорды. Так закрытые двери и завалы попадают в хорды, и метод
+        Харди–Кросса сходится быстро."""
+        parent_uf = {n: n for n in self.nodes}
 
-    def travel_s(self, seg, forward, loaded):
-        grade = seg.grade if forward else -seg.grade
-        return seg.length / (self.speed_kmh(loaded, grade) / 3.6)
+        def find(x):
+            while parent_uf[x] != x:
+                parent_uf[x] = parent_uf[parent_uf[x]]
+                x = parent_uf[x]
+            return x
 
-    def route(self, src, dst, loaded):
-        """Dijkstra on open segments. Returns [(segment, forward)], or None."""
-        if src == dst:
-            return []
-        dist = {src: 0.0}
-        prev = {}
-        heap = [(0.0, src)]
-        while heap:
-            d, n = heapq.heappop(heap)
-            if n == dst:
-                break
-            if d > dist.get(n, math.inf):
-                continue
-            for m, seg, fwd in self.adj[n]:
-                if not seg.open:
+        tree, chords = [], []
+        for aw in sorted(self.airways.values(), key=lambda a: a.R):
+            ra, rb = find(aw.a), find(aw.b)
+            if ra == rb:
+                chords.append(aw)
+            else:
+                parent_uf[ra] = rb
+                tree.append(aw)
+        adj = {}
+        for aw in tree:
+            adj.setdefault(aw.a, []).append((aw.b, aw))
+            adj.setdefault(aw.b, []).append((aw.a, aw))
+        parent = {SURFACE: None}
+        stack = [SURFACE]
+        while stack:
+            n = stack.pop()
+            for m, aw in adj.get(n, []):
+                if m not in parent:
+                    parent[m] = (n, aw)
+                    stack.append(m)
+
+        def path(n):
+            p = []
+            while parent.get(n):
+                pn, paw = parent[n]
+                p.append((paw, n))
+                n = pn
+            return p
+
+        meshes = []
+        for aw in chords:
+            pa, pb = path(aw.a), path(aw.b)
+            sa = {x[0].id for x in pa}
+            sb = {x[0].id for x in pb}
+            mesh = [(aw, 1)]
+            for paw, child in pb:                                     # от b вверх к общему предку
+                if paw.id in sa:
+                    break
+                mesh.append((paw, 1 if paw.a == child else -1))
+            for paw, child in pa:                                     # от общего предка вниз к a
+                if paw.id in sb:
+                    break
+                mesh.append((paw, -1 if paw.a == child else 1))
+            meshes.append(mesh)
+        return meshes
+
+    def fan_pressure(self, q):
+        if not self.fan_on or self.fan_speed <= 0:
+            return 0.0
+        qmax = C.FAN["q_nominal_m3s"] * 1.6 * self.fan_speed
+        p0 = C.FAN["p_nominal_pa"] * 1.5 * self.fan_speed ** 2
+        return max(0.0, p0 * (1 - (q / qmax) ** 2))
+
+    def solve(self, iterations=120):
+        """Харди–Кросс. Вентилятор всасывающий на ветви shaft:shaft-vent: напор действует от
+        ствола (b) к поверхности (a), то есть против направления ветви."""
+        fan = self.airways["shaft:shaft-vent"]
+        self.meshes = self._find_meshes()          # топология меняется (двери, завалы)
+        qmax = C.FAN["q_nominal_m3s"] * 1.6 * max(0.05, self.fan_speed)
+        p0 = C.FAN["p_nominal_pa"] * 1.5 * self.fan_speed ** 2 if self.fan_on else 0.0
+        # начальное приближение, удовлетворяющее балансу узлов: небольшой расход по каждому контуру
+        for aw in self.airways.values():
+            aw.q = 0.0
+        for mesh in self.meshes:
+            for aw, sgn in mesh:
+                aw.q += 5.0 * sgn
+        for _ in range(iterations):
+            for mesh in self.meshes:
+                num = den = 0.0
+                for aw, sgn in mesh:
+                    q = aw.q * sgn
+                    num += aw.R * q * abs(q)
+                    den += 2 * aw.R * abs(q)
+                    if aw is fan and p0 > 0:
+                        qf = abs(aw.q)
+                        h = max(0.0, p0 * (1 - (qf / qmax) ** 2))
+                        num += sgn * h                    # напор направлен b->a: в контуре со знаком sgn даёт -(-sgn)·h
+                        den += 2 * p0 * qf / qmax ** 2
+                if den < 1e-9:
                     continue
-                nd = d + self.travel_s(seg, fwd, loaded)
-                if nd < dist.get(m, math.inf):
-                    dist[m] = nd
-                    prev[m] = (n, seg, fwd)
-                    heapq.heappush(heap, (nd, m))
-        if dst not in prev:
-            return None
-        path = []
-        n = dst
-        while n != src:
-            p, seg, fwd = prev[n]
-            path.append((seg, fwd))
-            n = p
-        path.reverse()
-        return path
+                dq = max(-40.0, min(40.0, -num / den))
+                for aw, sgn in mesh:
+                    aw.q += dq * sgn
+        self.fan_q = -fan.q
+        self.fan_p = max(0.0, p0 * (1 - (abs(fan.q) / qmax) ** 2)) if p0 > 0 else 0.0
 
-    def route_time(self, src, dst, loaded):
-        r = self.route(src, dst, loaded)
-        if r is None:
-            return math.inf
-        return sum(self.travel_s(s, f, loaded) for s, f in r)
+    def flow_into(self, node):
+        return sum(aw.q for aw in self.airways.values() if aw.b == node and aw.q > 0) + \
+            sum(-aw.q for aw in self.airways.values() if aw.a == node and aw.q < 0)
+
+    def path_open(self, src, dst):
+        seen, stack = {src}, [src]
+        while stack:
+            n = stack.pop()
+            if n == dst:
+                return True
+            for aw in self.airways.values():
+                if aw.blocked or aw.id.startswith("shaft:"):
+                    continue
+                m = aw.b if aw.a == n else aw.a if aw.b == n else None
+                if m and m not in seen:
+                    seen.add(m)
+                    stack.append(m)
+        return False
 
 
-class Block:
-    def __init__(self, spec):
+# ============================================================ объекты
+class Chamber:
+    STAGES = ["drilling", "charging", "charged", "ventilating", "scaling", "bolting", "mucking"]
+
+    def __init__(self, spec, panel):
         self.__dict__.update(spec)
-        self.remaining = float(spec["tonnes"])
-        self.status = "insitu"      # insitu -> drilling -> charged -> blasted -> mining -> mined
-        self.prep_timer = 0.0
-        self.p80 = 0.0
+        self.panel = panel
+        self.layer = spec["layer"]
+        self.state = spec["state"]                  # virgin | idle | <stage> | mined_out | closed
+        self.remaining = 0.0 if self.state == "mined_out" else C.CHAMBER_TONNES
+        self.timer = 0.0
+        self.crew = None
+        self.lhd = None
+        self.jumbo = None
+        self.aux_fan = False
+        self.aux_fan_failed = False
+        self.air = 0.0                              # м3/мин фактически
+        self.air_required = 0.0
+        self.co = 0.0                               # % об.
+        self.no2 = 0.0
+        self.temp = C.AIR["rock_temp_c"]
+        self.blast_t = None                         # время взрыва
+        self.verdict = "—"
+        self.reason = ""
+        self.restrict_diesel = False     # ограничение: без дизельной техники (воздух)
+        self.restrict_blast = False      # ограничение: без новых взрывов (целики, сейсмика)
+        self.pillar = None
+        self.dirty = True
+
+    @property
+    def cx(self):
+        return self.x + self.w / 2
+
+    @property
+    def cy(self):
+        return self.y + self.l / 2
+
+    @property
+    def people(self):
+        return self.crew.size if self.crew and self.crew.state == "в камере" else 0
+
+    @property
+    def diesel_kw(self):
+        return C.LHD["kw"] if (self.lhd and self.lhd.state == "выпуск") else 0.0
+
+    @property
+    def air_required_full(self):
+        """Потребность камеры, если её ПДМ работает: по ней планируется наряд (без дребезга)."""
+        return C.AIR["per_person_m3min"] * C.CREW_SIZE + (C.AIR["per_diesel_kw_m3min"] * C.LHD["kw"] if self.lhd else 0.0)
+
+    @property
+    def occupied(self):
+        return self.crew is not None and self.crew.state in ("в камере", "спуск")
+
+    def has_work(self):
+        return self.state not in ("mined_out", "closed")
+
+
+class Pillar:
+    def __init__(self, spec, chamber):
+        self.__dict__.update(spec)
+        self.chamber = chamber
+        self.extracted = False
+        self.damage = 0.0            # 0..1 накопленное повреждение (сейсмика, время)
+        self.convergence = 0.2
+        self.status = "устойчив"
+        self.sf = 3.0
+        self.strength = 0.0
+        self.stress = 0.0
         self.dirty = True
 
 
-class Excavator:
+class Panel:
     def __init__(self, spec):
-        self.id = spec["id"]
-        self.bench = spec["bench"]
-        self.face = C.FACE_OF_BENCH[spec["bench"]]
-        self.bucket = spec["bucket_t"]
-        self.pass_s = spec["pass_s"]
-        self.state = "idle"         # idle | loading | waiting | down | service | no_block
-        self.block = None
-        self.passes = 0
-        self.tonnes = 0.0
-        self.queue = deque()        # trucks waiting at this face
-        self.loading_truck = None
+        self.__dict__.update(spec)
+        self.in_node, self.out_node = spec["in"], spec["out"]
+        self.seismic_class_initial = spec["seismic_class"]
+        self.chambers = []
+        self.pillars = []
+        self.q_in = 0.0
+        self.seismic_class = spec["seismic_class"]
+        self.bumps_shift = 0
+        self.energy_shift = 0.0
+        self.max_bump = 0.0
+        self.hazard = "низкая"
+        self.evacuated_until = 0.0
+        self.extra_diesel_kw = 0.0   # сценарий: самосвал/техника в панели
+        self.ore_pass_level = 0.0
+        self.ore_pass_total = 0.0
+        self.layers_mined = 0
+        self.status = "работа"
+
+
+class Crew:
+    def __init__(self, cid):
+        self.id = cid
+        self.name = f"звено-{cid.split('-')[1]}"
+        self.size = C.CREW_SIZE
+        self.chamber = None
+        self.task = ""
+        self.state = "на поверхности"      # на поверхности | спуск | в камере | выведено | подъём
+        self.xy = C.NODES["shaft-cage"]["xy"]
+        self.exposure = 0.0
         self.timer = 0.0
-        self.hours = 0.0
-        self.since_service = 0.0
-        self.busy_s = 0.0
-        self.total_s = 0.0
-        self.forced_down = False
-        self.down_timer = 0.0
-        self.failures = 0
 
 
-class Truck:
-    def __init__(self, idx, rng):
-        self.id = f"truck-{idx:02d}"
-        self.idx = idx
-        self.state = "idle"
-        self.node = "fuel"          # current node when not on a road
-        self.path = []              # remaining [(segment, forward)]
-        self.seg = None
-        self.fwd = True
-        self.dist = 0.0             # metres along current segment
-        self.xy = C.NODES["fuel"]["xy"]
-        self.payload = 0.0
-        self.material = ""
-        self.grade = 0.0
-        self.hardness = 0.0
-        self.speed = 0.0
-        self.fuel = C.TRUCK["tank_l"] * rng.uniform(0.5, 1.0)
-        self.fuel_rate = 0.0
-        self.trips = 0
+class Machine:
+    def __init__(self, mid, kind, xy):
+        self.id = mid
+        self.kind = kind                   # lhd | jumbo
+        self.chamber = None
+        self.state = "стоянка"
+        self.xy = xy
+        self.tonnes_shift = 0.0
+        self.buckets = 0
+        self.rounds = 0
         self.hours = 0.0
-        self.since_service = 0.0
-        self.health = 100.0
-        self.excavator = None
-        self.destination = ""
         self.timer = 0.0
-        self.cycle_start = 0.0
-        self.wait_s = 0.0
-        self.forced_parked = False
-        self.down_timer = 0.0
-        self.failures = 0
-
-    @property
-    def loaded(self):
-        return self.payload > 1.0
 
 
+# ============================================================ рудник
 class Mine:
     def __init__(self, seed=42):
         self.rng = random.Random(seed)
-        self.t = 0.0                            # simulated seconds
-        self.net = Network()
-        self.blocks = [Block(b) for b in build_blocks()]
-        self.blocks_by_bench = {}
-        for b in self.blocks:
-            self.blocks_by_bench.setdefault(b.bench, []).append(b)
-        self.excavators = [Excavator(e) for e in C.EXCAVATORS]
-        self.trucks = [Truck(i, self.rng) for i in range(1, C.TRUCK_COUNT + 1)]
-        self.cutoff = C.CUTOFF_GRADE
-        # facilities
-        self.crusher_up = True
-        self.crusher_forced_down = False
-        self.crusher_bin = 0.0
-        self.crusher_bin_grade_t = 0.0        # sum grade*t in bin
-        self.crusher_bin_hard_t = 0.0
+        self.t = 0.0
+        self.shift_no = 1
+        self.shift_phase = "работа"       # работа | пересменка
+        self.net = VentNetwork()
+        self.panels = {p["id"]: Panel(p) for p in C.PANELS}
+        chambers, pillars = build_chambers()
+        self.chambers = {}
+        self.pillars = {}
+        for c in chambers:
+            ch = Chamber(c, self.panels[c["panel"]])
+            self.chambers[ch.id] = ch
+            self.panels[c["panel"]].chambers.append(ch)
+        for p in pillars:
+            pl = Pillar(p, self.chambers[p["chamber"]])
+            self.pillars[pl.id] = pl
+            self.chambers[p["chamber"]].pillar = pl
+            self.panels[p["panel"]].pillars.append(pl)
+        self.crews = [Crew(c) for c in C.CREWS]
+        self.lhds = [Machine(m, "lhd", C.NODES["j-main-1"]["xy"]) for m in C.LHDS]
+        self.jumbos = [Machine(m, "jumbo", C.NODES["j-main-2"]["xy"]) for m in C.JUMBOS]
+        self.crusher_bunker = 0.0
         self.crusher_tph = 0.0
         self.crusher_total = 0.0
-        self.crusher_feed_log = deque()       # (t, tonnes, grade) dumps in last hour
-        self.crusher_p80_factor = 1.0
-        self.crusher_queue = deque()
-        self.crusher_dumping = None
-        self.stock_t = C.STOCKPILE["initial_t"]
-        self.stock_grade_t = C.STOCKPILE["initial_t"] * C.STOCKPILE["initial_grade"]
-        self.stock_reclaim_tph = 0.0
-        self.stock_queue = deque()
-        self.stock_dumping = None
-        self.dump_t = 0.0
-        self.dump_queue = deque()
-        self.dump_dumping = None
-        self.fuel_queue = deque()
-        self.fuel_busy = None
-        self.diesel_issued = 0.0
-        # plant
-        self.mill_tph = 0.0
-        self.mill_total = 0.0
-        self.mill_power = 0.0
-        self.mill_specific = 0.0
-        self.mill_grade = 0.0
-        self.crusher_power = 0.0
-        self.recovery = 0.0
-        self.conc_tph = 0.0
-        self.conc_total = 0.0
-        self.cu_total = 0.0
-        self.tail_grade = 0.0
-        self.energy_kwh = 0.0
-        self.diesel_l = 0.0
-        self.diesel_rate = 0.0
-        self.load_kw = 0.0
-        # mine totals
-        self.ore_t = 0.0
-        self.waste_t = 0.0
-        self.cycles = deque(maxlen=40)        # recent cycle durations, s
-        self.waits = deque(maxlen=40)
-        self.blend_mode = "normal"
-        self.scenarios = {}                   # active what-if scenarios
-        self.fleet_target = C.TRUCK_COUNT
-        self.events = deque(maxlen=50)        # (t, text) for the UI
-        self.events_total = 0                 # ever logged, so publishers can find the new ones
-        self.dispatch_table = {}
-        # the mine starts mid-operation: two blasted blocks ahead on each bench, a third being drilled
-        for blocks in self.blocks_by_bench.values():
-            for b in blocks[:2]:
-                b.status, b.p80 = "blasted", frag_p80_mm(b.hardness, self.rng)
-            if len(blocks) > 2:
-                blocks[2].status, blocks[2].prep_timer = "drilling", self.rng.uniform(0, DRILL_H * 3600)
-        for ex in self.excavators:
-            self._next_block(ex)
+        self.hoist_tph = 0.0
+        self.hoist_total = 0.0
+        self.hoist_buffer = 0.0
+        self.skips = 0
+        self.ore_shift = 0.0
+        self.alarm = "нет"
+        self.scenarios = {}
+        self.manual_plan = {}             # crew id -> chamber id (наряд мастера)
+        self.auto_plan = True
+        self.rejected = ""
+        self.last_change = ""
+        self.events = deque(maxlen=60)
+        self.events_total = 0
+        self.sensors = {s["id"]: {"node": s["node"], "co": 0.0, "no2": 0.0, "temp": C.AIR["rock_temp_c"], "v": 0.0, "alarm": "норма"} for s in C.SENSORS}
+        self.shift_elapsed = 0.0
+        self._update_ground()
+        self._ventilate(0.0)
+        self._plan_shift(initial=True)
 
-    # ------------------------------------------------------------------ util
+    # ------------------------------------------------------------ служебное
     def log(self, text):
         self.events.append((round(self.t / 3600, 2), text))
         self.events_total += 1
 
-    def feed_grade_1h(self):
-        tot = sum(w for _, w, _ in self.crusher_feed_log)
-        if tot <= 0:
-            return 0.0
-        return sum(w * g for _, w, g in self.crusher_feed_log) / tot
+    def chamber_neighbors(self, ch):
+        return [c for c in ch.panel.chambers if c is not ch and abs(c.row - ch.row) <= 1 and abs(c.col - ch.col) <= 1]
 
-    def stock_grade(self):
-        return self.stock_grade_t / self.stock_t if self.stock_t > 1 else 0.0
-
-    # ------------------------------------------------------------ geology
-    def _next_block(self, ex):
-        """Hand the excavator the next prepared block on its bench."""
-        cand = [b for b in self.blocks_by_bench[ex.bench] if b.status == "blasted"]
-        if not cand:
-            ex.block = None
-            ex.state = "no_block"
-            return
-        b = cand[0]
-        b.status = "mining"
-        b.dirty = True
-        ex.block = b
-        if ex.state == "no_block":
-            ex.state = "idle"
-        self.log(f"{ex.id}: начал отработку блока {b.id} ({b.grade} % Cu, {'руда' if b.grade >= self.cutoff else 'порода'})")
-
-    def _step_prep(self, dt):
-        """Drill-and-blast crew: keep two blasted blocks ahead on every bench."""
-        for bench, blocks in self.blocks_by_bench.items():
-            ready = sum(1 for b in blocks if b.status in ("blasted",))
-            inprog = [b for b in blocks if b.status in ("drilling", "charged")]
-            for b in inprog:
-                b.prep_timer += dt
-                if b.status == "drilling" and b.prep_timer >= DRILL_H * 3600:
-                    b.status, b.prep_timer, b.dirty = "charged", 0.0, True
-                elif b.status == "charged" and b.prep_timer >= CHARGE_H * 3600:
-                    b.status, b.dirty = "blasted", True
-                    b.p80 = frag_p80_mm(b.hardness, self.rng)
-                    self.log(f"Взрыв блока {b.id}: P80 {b.p80:.0f} мм")
-            if ready + len(inprog) < 2:
-                nxt = next((b for b in blocks if b.status == "insitu"), None)
-                if nxt:
-                    nxt.status, nxt.prep_timer, nxt.dirty = "drilling", 0.0, True
-
-    # ---------------------------------------------------------- dispatcher
-    def _choose_excavator(self, truck):
-        """Min expected wait, nudged by the blend target. Returns excavator or None."""
-        best, best_score = None, math.inf
-        feed = self.feed_grade_1h()
-        lo, hi = C.BLEND["target_grade"] - C.BLEND["band"], C.BLEND["target_grade"] + C.BLEND["band"]
-        for ex in self.excavators:
-            if ex.state in ("down", "service", "no_block") or ex.block is None:
+    # ------------------------------------------------------------ горное давление
+    def _update_ground(self):
+        for pl in self.pillars.values():
+            ch = pl.chamber
+            if pl.extracted:
+                pl.sf, pl.status = 0.0, "извлечён"
                 continue
-            travel = self.net.route_time(truck.node, ex.face, loaded=False)
-            if travel == math.inf:
+            layers = max(1, ch.layer + (1 if ch.state in Chamber.STAGES and ch.state != "drilling" else 0))
+            h = C.LAYER_H * layers
+            # локальное извлечение: доля отработанных соседних камер и извлечённых целиков
+            nb = self.chamber_neighbors(ch)
+            mined_nb = sum(1 for c in nb if c.layer > 0 or c.state in Chamber.STAGES) / max(1, len(nb))
+            extracted_nb = sum(1 for c in nb if c.pillar and c.pillar.extracted)
+            e = C.EXTRACTION_RATIO * (0.55 + 0.45 * mined_nb) * (0.9 if pl.edge else 1.0)
+            e = min(0.95, e + 0.06 * extracted_nb)
+            strength = pillar_strength_mpa(pl.w, h) * (1 - 0.5 * pl.damage)
+            stress = pillar_stress_mpa(e)
+            pl.strength, pl.stress = strength, stress
+            sf = strength / stress
+            pl.sf = sf
+            old = pl.status
+            pl.status = "устойчив" if sf >= C.SF_OK else "наблюдение" if sf >= C.SF_WATCH else "критический"
+            if pl.status != old:
+                pl.dirty = True
+                if pl.status == "критический":
+                    self.log(f"Целик {pl.id[1:]}: SF {sf:.2f} < {C.SF_WATCH}, камеры рядом закрываются")
+            # конвергенция растёт с падением запаса (ДОПУЩЕНИЕ: 0,2 мм/сут при SF 2,5, ~2 мм/сут при SF 1,2)
+            pl.convergence = round(0.2 * (2.5 / max(0.6, sf)) ** 2.2 * (1 + pl.damage), 2)
+            pl.h = h
+
+    def _seismic_shift(self):
+        """В начале смены: толчки за смену по статистике seismic-bumps."""
+        for p in self.panels.values():
+            cls = p.seismic_class if p.seismic_class in C.SEISMIC else "b"
+            rate = C.SEISMIC[cls]["bumps_per_shift"]
+            # больше вынутых слоёв и критических целиков -> больше толчков (ДОПУЩЕНИЕ)
+            crit = sum(1 for pl in p.pillars if pl.status in ("критический", "извлечён"))
+            rate *= 1 + 0.15 * crit
+            n = 0
+            lam = rate
+            # Пуассон
+            L, k, pr = math.exp(-lam), 0, 1.0
+            while True:
+                pr *= self.rng.random()
+                if pr < L:
+                    break
+                k += 1
+            n = k
+            energies = [10 ** self.rng.uniform(1.5, 3.9 + (0.6 if cls != "a" else 0.0) + 0.3 * crit) for _ in range(n)]
+            p.bumps_shift = n
+            p.energy_shift = round(sum(energies))
+            p.max_bump = round(max(energies)) if energies else 0
+            if p.max_bump >= C.SEISMIC["stop_energy_j"]:
+                p.evacuated_until = self.t + C.SEISMIC["evacuate_h"] * 3600
+                p.hazard = "высокая"
+                for pl in p.pillars:
+                    if not pl.extracted:
+                        pl.damage = min(1.0, pl.damage + 0.08)
+                self.log(f"{p.name}: сейсмический толчок {p.max_bump:.0f} Дж, люди выводятся на {C.SEISMIC['evacuate_h']:.0f} ч")
+            elif p.energy_shift >= C.SEISMIC["energy_p90_j"]:
+                p.hazard = "повышенная"
+            else:
+                p.hazard = "низкая"
+            p.seismic_class = "b" if p.energy_shift >= C.SEISMIC["energy_p90_j"] or crit else p.seismic_class_initial
+
+    # ------------------------------------------------------------ вентиляция и газы
+    def _ventilate(self, dt):
+        self.net.solve()
+        for p in self.panels.values():
+            aw = next(a for a in self.net.airways.values() if a.panel == p.id)
+            p.q_in = max(0.0, abs(aw.q))
+            active = [c for c in p.chambers if c.aux_fan]
+            # камеры панели проветриваются сквозной струёй: каждая работающая камера получает
+            # долю расхода панели; ВМП добавляет не больше своей подачи и не больше струи
+            budget = p.q_in * 60 * C.AIR["panel_share"]
+            for c in p.chambers:
+                c.air_required = C.AIR["per_person_m3min"] * c.people + C.AIR["per_diesel_kw_m3min"] * c.diesel_kw
+            need = sum(c.air_required for c in active) or 1.0
+            # струя панели делится между работающими камерами пропорционально потребности,
+            # но не меньше 1/n на камеру (сквозное проветривание)
+            for c in p.chambers:
+                if not c.aux_fan or c.aux_fan_failed:
+                    c.air = 0.0
+                else:
+                    c.air = budget * max(c.air_required / need, 1.0 / max(1, len(active)) * 0.5) if active else 0.0
+            p.air_budget = budget
+            for c in p.chambers:
+                # газы в камере: стационарное выделение дизеля + затухание взрывных газов
+                q_m3s = max(0.05, c.air / 60)
+                emission_co = c.diesel_kw * C.DIESEL_EMISSION["co_g_per_kwh"] / 3600        # г/с
+                emission_no2 = c.diesel_kw * C.DIESEL_EMISSION["no2_g_per_kwh"] / 3600
+                ss_co = emission_co / q_m3s * 0.08 / 1000 * 1000      # г/м3 -> % об. (1 г/м3 CO ≈ 0,08 %)
+                ss_no2 = emission_no2 / q_m3s * 0.052 / 1000 * 1000   # 1 г/м3 NO2 ≈ 0,052 %
+                vol = C.CHAMBER_VOLUME * (10 if c.state == "ventilating" else 1)   # взрывные газы занимают камеру и прилегающие выработки
+                tau = vol / q_m3s if c.air > 0 else 1e9
+                k = 1 - math.exp(-dt / max(60.0, tau)) if dt > 0 else 0
+                bg_co, bg_no2 = getattr(c, "co_bg", 0.0), getattr(c, "no2_bg", 0.0)
+                c.co += (ss_co + bg_co - c.co) * k
+                c.no2 += (ss_no2 + bg_no2 - c.no2) * k
+                # тепло дизеля: 1,5 кВт на кВт мощности при коэффициенте загрузки 0,5; cp·ρ воздуха 1,2 кДж/(м3·К)
+                heat_c = c.diesel_kw * C.DIESEL_EMISSION["heat_kw_per_kw"] * 0.5 / (1.2 * q_m3s) if c.diesel_kw else 0.0
+                target_t = C.AIR["rock_temp_c"] + min(12.0, heat_c) + (0.8 * c.people / 5)
+                c.temp += (target_t - c.temp) * (1 - math.exp(-dt / 900.0)) if dt > 0 else 0
+            # панельная выработка: средневзвешенный CO исходящей
+            aw.people = sum(c.people for c in p.chambers)
+            aw.vehicles = sum(1 for c in p.chambers if c.diesel_kw > 0)
+        # перенос газов по сети: концентрация в узле = смешение входящих струй по расходу,
+        # в ветви = концентрация узла-истока + собственный источник (панели: дизель, взрывные газы)
+        aws = [a for a in self.net.airways.values()]
+        src = {}
+        for p in self.panels.values():
+            paw = next(a for a in aws if a.panel == p.id)
+            q = max(0.5, p.q_in)
+            co_src = sum(c.co * max(0, c.air) for c in p.chambers) / (q * 60) + p.extra_diesel_kw * C.DIESEL_EMISSION["co_g_per_kwh"] / 3600 / q * 0.08
+            no2_src = sum(c.no2 * max(0, c.air) for c in p.chambers) / (q * 60) + p.extra_diesel_kw * C.DIESEL_EMISSION["no2_g_per_kwh"] / 3600 / q * 0.052
+            heat = sum((c.temp - C.AIR["rock_temp_c"]) * max(0, c.air) for c in p.chambers) / (q * 60)
+            src[paw.id] = (co_src, no2_src, heat)
+        node_c = {n: (0.0, 0.0, 0.0) for n in self.net.nodes}
+        for _ in range(8):
+            for aw in aws:
+                up = aw.a if aw.q >= 0 else aw.b
+                base = node_c[up] if up != SURFACE else (0.0, 0.0, 0.0)
+                add = src.get(aw.id, (0.0, 0.0, 0.0))
+                aw.co, aw.no2 = base[0] + add[0], base[1] + add[1]
+                aw.temp = C.AIR["rock_temp_c"] + base[2] + add[2]
+            for n in self.net.nodes:
+                if n == SURFACE:
+                    continue
+                inflow = [(abs(a.q), a) for a in aws if (a.b == n and a.q > 0) or (a.a == n and a.q < 0)]
+                tot = sum(q for q, _ in inflow)
+                if tot > 1e-6:
+                    node_c[n] = (sum(q * a.co for q, a in inflow) / tot, sum(q * a.no2 for q, a in inflow) / tot,
+                                 sum(q * (a.temp - C.AIR["rock_temp_c"]) for q, a in inflow) / tot)
+        self.node_c = node_c
+        # камеры дышат воздухом своей панели: фоновая концентрация на входе панели
+        for p in self.panels.values():
+            bg = node_c.get(p.in_node, (0.0, 0.0, 0.0))
+            for c in p.chambers:
+                c.co_bg, c.no2_bg = bg[0], bg[1]
+        # датчики АГК
+        for sid, s in self.sensors.items():
+            node = s["node"]
+            c = node_c.get(node, (0.0, 0.0, 0.0))
+            near = [a for a in self.net.airways.values() if node in (a.a, a.b) and not a.id.startswith("shaft:")]
+            s["co"], s["no2"], s["temp"] = c[0], c[1], C.AIR["rock_temp_c"] + c[2]
+            s["v"] = max((a.velocity for a in near), default=0.0)
+            s["alarm"] = ("CO" if s["co"] > C.AIR["co_limit_pct"] else "NO2" if s["no2"] > C.AIR["no2_limit_pct"]
+                          else "температура" if s["temp"] > C.AIR["t_max_c"] else "нет струи" if s["v"] < 0.15 else "норма")
+
+    # ------------------------------------------------------------ вердикты
+    def _verdict(self, ch):
+        """Можно ли ставить людей в камеру: (вердикт, причина)."""
+        p = ch.panel
+        if not ch.has_work():
+            return ("—", "камера отработана" if ch.state == "mined_out" else "закрыта")
+        reasons_forbid, reasons_restrict = [], []
+        if self.t < p.evacuated_until:
+            reasons_forbid.append(f"панель выведена после толчка до {p.evacuated_until / 3600:.1f} ч")
+        if not self.net.path_open(p.in_node, "shaft-cage"):
+            reasons_forbid.append("нет открытого пути к стволу")
+        pl = ch.pillar
+        near = [pl] + [c.pillar for c in self.chamber_neighbors(ch) if c.pillar]
+        crit = [x for x in near if x.status == "критический"]
+        watch = [x for x in near if x.status == "наблюдение"]
+        if crit:
+            reasons_forbid.append(f"целик {crit[0].id[1:]} критический (SF {crit[0].sf:.2f})")
+        if pl.convergence >= C.CONVERGENCE_CLOSE_MM_D:
+            reasons_forbid.append(f"конвергенция {pl.convergence} мм/сут")
+        if ch.state == "ventilating":
+            since = (self.t - ch.blast_t) / 60 if ch.blast_t else 0
+            if since < C.AIR["blast_reentry_min"] or ch.co > C.AIR["co_limit_pct"]:
+                reasons_forbid.append(f"проветривание после взрыва: CO {ch.co * 1000:.2f}‰, {since:.0f} мин")
+        if ch.co > C.AIR["co_limit_pct"]:
+            reasons_forbid.append(f"CO {ch.co:.4f} % > {C.AIR['co_limit_pct']} %")
+        if ch.no2 > C.AIR["no2_limit_pct"]:
+            reasons_forbid.append(f"NO2 {ch.no2:.5f} % > {C.AIR['no2_limit_pct']} %")
+        if ch.temp > C.AIR["t_max_c"]:
+            reasons_forbid.append(f"температура {ch.temp:.1f} °C")
+        if p.q_in * 60 < C.AIR["per_person_m3min"] * C.CREW_SIZE * 1.5:
+            reasons_forbid.append(f"в панели нет струи ({p.q_in:.1f} м3/с)")
+        # воздух под людей и дизель
+        # бюджет воздуха панели за вычетом полной потребности других занятых камер
+        others = sum(c.air_required_full for c in p.chambers if c is not ch and c.aux_fan and not c.aux_fan_failed)
+        avail = max(0.0, getattr(p, "air_budget", p.q_in * 60 * C.AIR["panel_share"]) - others)
+        need_people = C.AIR["per_person_m3min"] * C.CREW_SIZE
+        need_lhd = need_people + C.AIR["per_diesel_kw_m3min"] * C.LHD["kw"]
+        restrict_diesel = restrict_blast = False
+        if ch.aux_fan_failed:
+            reasons_forbid.append("отказ ВМП, камера не проветривается")
+        elif avail < need_people:
+            reasons_forbid.append(f"воздуха {avail:.0f} м3/мин < {need_people:.0f} на звено")
+        elif avail < need_lhd:
+            reasons_restrict.append(f"воздуха {avail:.0f} м3/мин: без дизельной техники (ПДМ нужно {need_lhd:.0f})")
+            restrict_diesel = True
+        if watch:
+            reasons_restrict.append(f"целик {watch[0].id[1:]} под наблюдением (SF {watch[0].sf:.2f}): без новых взрывов, осмотр кровли")
+            restrict_blast = True
+        if p.hazard == "повышенная":
+            reasons_restrict.append("повышенная сейсмическая активность: без новых взрывов")
+            restrict_blast = True
+        if ch.state in ("charged",):
+            reasons_restrict.append("камера заряжена, ждёт взрыва")
+        ch.restrict_diesel, ch.restrict_blast = restrict_diesel, restrict_blast
+        if reasons_forbid:
+            return ("запрещено", "; ".join(reasons_forbid))
+        if reasons_restrict:
+            return ("ограничено", "; ".join(reasons_restrict))
+        return ("разрешено", "воздух и целики в норме")
+
+    def _update_verdicts(self):
+        for ch in self.chambers.values():
+            v, r = self._verdict(ch)
+            if (v, r) != (ch.verdict, ch.reason):
+                if v != ch.verdict and ch.verdict != "—" and v in ("запрещено",) and ch.crew:
+                    self.log(f"Камера {ch.id[1:]}: {v} — {r}")
+                ch.verdict, ch.reason = v, r
+                ch.dirty = True
+
+    def _air_allows_lhd(self, ch):
+        p = ch.panel
+        others = sum(c.air_required_full for c in p.chambers if c is not ch and c.aux_fan and not c.aux_fan_failed)
+        budget = getattr(p, "air_budget", p.q_in * 60 * C.AIR["panel_share"])
+        return budget - others >= C.AIR["per_person_m3min"] * C.CREW_SIZE + C.AIR["per_diesel_kw_m3min"] * C.LHD["kw"]
+
+    # ------------------------------------------------------------ наряд
+    def _plan_shift(self, initial=False):
+        """Горный мастер: расставить звенья, ПДМ и СБУ по камерам по вердиктам."""
+        keep = {}
+        for crew in self.crews:
+            ch = crew.chamber
+            # преемственность: звено остаётся в своей камере, если там есть работа и наряд допустим
+            if ch and ch.crew is crew and ch.has_work() and ch.state not in ("charged", "ventilating") and ch.verdict in ("разрешено", "ограничено"):
+                keep[crew.id] = ch
+            if ch and ch.crew is crew:
+                ch.crew = None
+            crew.chamber = None
+        for m in self.lhds + self.jumbos:
+            if m.chamber:
+                if m.kind == "lhd":
+                    m.chamber.lhd = None
+                else:
+                    m.chamber.jumbo = None
+            m.chamber = None
+            m.state = "стоянка"
+        self._update_verdicts()
+        # кандидаты: камеры с работой и допустимым вердиктом, приоритет — незавершённый цикл
+        def prio(c):
+            stage = Chamber.STAGES.index(c.state) if c.state in Chamber.STAGES else -1
+            return (0 if c.verdict == "разрешено" else 1, -stage, -c.layer, c.panel.id, c.row, c.col)
+        cands = [c for c in self.chambers.values() if c.has_work() and c.verdict in ("разрешено", "ограничено")
+                 and c.state not in ("charged", "ventilating")
+                 and not (c.restrict_blast and c.state in ("virgin", "idle", "drilling", "charging"))]
+        cands.sort(key=prio)
+        assigned = []
+        # ручной наряд мастера имеет приоритет
+        plan_lines = []
+        for crew in self.crews:
+            target = keep.get(crew.id)
+            if target is not None and (target.crew is not None or target in assigned):
+                target = None
+            manual = self.manual_plan.get(crew.id)
+            if manual and manual in self.chambers:
+                mc = self.chambers[manual]
+                if mc.verdict in ("разрешено", "ограничено") and mc.has_work() and mc.crew is None:
+                    target = mc
+                else:
+                    self.rejected = f"{crew.name} → {manual[1:]}: {mc.verdict}, {mc.reason}"
+                    self.log(f"Наряд отклонён: {self.rejected}")
+                    self.manual_plan.pop(crew.id, None)
+            if target is None and self.auto_plan:
+                target = next((c for c in cands if c.crew is None and c not in assigned), None)
+            if target is None:
+                crew.state = "на поверхности" if initial else "резерв"
+                crew.task = "резерв"
+                plan_lines.append(f"{crew.name}: резерв")
                 continue
-            load_s = ex.pass_s * math.ceil(C.TRUCK["capacity_t"] / ex.bucket) + C.TRUCK["spot_s"]
-            inbound = sum(1 for t in self.trucks if t.excavator is ex and t.state in ("to_face", "queued_at_face", "spotting", "loading"))
-            score = travel + inbound * load_s
-            # blending: when the crusher feed drifts out of band, prefer the face that pulls it back
-            if ex.block.grade >= self.cutoff and feed > 0:
-                if feed > hi and ex.block.grade < feed:
-                    score -= 240
-                elif feed < lo and ex.block.grade > feed:
-                    score -= 240
-            if score < best_score:
-                best, best_score = ex, score
-        return best
+            target.crew = crew
+            crew.chamber = target
+            assigned.append(target)
+            crew.state = "спуск"
+            crew.timer = 0.0
+            if target.state in ("virgin", "idle"):
+                target.state = "drilling"
+                target.timer = 0.0
+                target.dirty = True
+            crew.task = target.state
+            plan_lines.append(f"{crew.name} → камера {target.id[1:]} ({target.verdict}: {target.state})")
+        # техника: СБУ в камеры бурения/крепления, ПДМ в камеры выпуска (если вердикт разрешает дизель)
+        for c in assigned:
+            if c.state in ("drilling", "bolting") and self.jumbos:
+                jb = next((j for j in self.jumbos if j.chamber is None), None)
+                if jb:
+                    jb.chamber, c.jumbo, jb.state = c, jb, "переезд"
+                    jb.timer = 0.0
+            if c.state == "mucking" and c.verdict == "разрешено" and self._air_allows_lhd(c):
+                lhd = next((l for l in self.lhds if l.chamber is None), None)
+                if lhd:
+                    lhd.chamber, c.lhd, lhd.state = c, lhd, "переезд"
+                    lhd.timer = 0.0
+        self.plan_text = "; ".join(plan_lines)
+        if not initial:
+            self.log(f"Смена {self.shift_no}: наряд — {self.plan_text}")
 
-    def _choose_destination(self, truck):
-        """Ore control + blending: where does this load go?"""
-        if truck.material == "waste":
-            return "dump"
-        feed = self.feed_grade_1h()
-        hi = C.BLEND["target_grade"] + C.BLEND["band"]
-        crusher_ok = self.crusher_up and self.crusher_bin < C.CRUSHER["bin_capacity_t"] - C.TRUCK["capacity_t"] \
-            and len(self.crusher_queue) < 3
-        if not crusher_ok:
-            return "stockpile" if self.stock_t < C.STOCKPILE["capacity_t"] else "dump"
-        # a very rich load on an already-rich feed goes to the stockpile for later blending
-        if feed > hi and truck.grade > hi and self.stock_t < C.STOCKPILE["capacity_t"] * 0.9:
-            self.blend_mode = "divert_rich_to_stockpile"
-            return "stockpile"
-        return "crusher"
-
-    # ------------------------------------------------------------- trucks
-    def _start_trip(self, truck, dst):
-        path = self.net.route(truck.node, dst, truck.loaded)
-        if path is None:
-            truck.state = "blocked"
-            truck.speed = 0.0
-            return False
-        truck.path = path
-        truck.destination = dst
-        truck.state = "hauling" if truck.loaded else "to_face" if dst in C.FACE_OF_BENCH.values() else "returning"
-        if dst == "fuel":
-            truck.state = "to_fuel"
-        if not path:
-            self._arrive(truck)
-        else:
-            self._enter_segment(truck)
-        return True
-
-    def _reroute(self, truck, dst):
-        """Change destination while driving: finish the current segment, then follow a new route."""
-        truck.destination = dst
-        if truck.seg is None:
-            self._start_trip(truck, dst)
+    # ------------------------------------------------------------ цикл камеры
+    def _step_chamber(self, ch, dt):
+        crew = ch.crew
+        working = crew is not None and crew.state == "в камере"
+        ch.aux_fan = (ch.occupied and ch.state in Chamber.STAGES and ch.state != "charged") or ch.state == "ventilating"
+        if ch.state == "charged":
             return
-        end = truck.seg.b if truck.fwd else truck.seg.a
-        rest = self.net.route(end, dst, truck.loaded)
-        truck.path = rest if rest is not None else []
-        if rest is None:
-            truck.state = "blocked"
+        if ch.state == "ventilating":
+            # взрывные газы рассеиваются (считается в _ventilate); вход по вердикту
+            if ch.blast_t and (self.t - ch.blast_t) / 60 >= C.AIR["blast_reentry_min"] and ch.co <= C.AIR["co_limit_pct"]:
+                ch.state, ch.timer, ch.dirty = "scaling", 0.0, True
+                self.log(f"Камера {ch.id[1:]}: проветрена, CO {ch.co:.4f} %, можно заходить")
+            return
+        if not working:
+            return
+        if ch.verdict == "запрещено":
+            return
+        if ch.restrict_blast and ch.state in ("drilling", "charging"):
+            return                                  # без новых взрывов: бурение и заряжание приостановлены
+        if ch.restrict_diesel and ch.lhd:
+            ch.lhd.state, ch.lhd.chamber, ch.lhd = "стоянка", None, None    # ПДМ уходит, воздуха на неё нет
+        ch.timer += dt
+        hours = ch.timer / 3600
+        if ch.state == "drilling":
+            if ch.jumbo and ch.jumbo.state == "переезд" and ch.jumbo.timer > 600:
+                ch.jumbo.state = "бурение"
+            if ch.jumbo and ch.jumbo.state == "бурение":
+                ch.jumbo.timer += dt
+            if hours >= C.CYCLE_H["drilling"]:
+                ch.state, ch.timer, ch.dirty = "charging", 0.0, True
+                if ch.jumbo:
+                    ch.jumbo.rounds += 1
+                    ch.jumbo.state = "стоянка"
+                    ch.jumbo.chamber, ch.jumbo = None, None
+        elif ch.state == "charging":
+            if hours >= C.CYCLE_H["charging"]:
+                ch.state, ch.timer, ch.dirty = "charged", 0.0, True
+                self.log(f"Камера {ch.id[1:]}: заряжена, взрыв в пересменку")
+        elif ch.state == "scaling":
+            if ch.verdict == "ограничено" or ch.verdict == "разрешено":
+                if hours >= C.CYCLE_H["scaling"]:
+                    ch.state, ch.timer, ch.dirty = "bolting", 0.0, True
+        elif ch.state == "bolting":
+            if hours >= C.CYCLE_H["bolting"]:
+                ch.state, ch.timer, ch.dirty = "mucking", 0.0, True
+                ch.remaining = C.CHAMBER_TONNES
+        elif ch.state == "mucking":
+            lhd = ch.lhd
+            if lhd is None:
+                lhd = next((l for l in self.lhds if l.chamber is None), None)
+                if lhd and ch.verdict == "разрешено" and self._air_allows_lhd(ch):
+                    lhd.chamber, ch.lhd, lhd.state, lhd.timer = ch, lhd, "переезд", 0.0
+                else:
+                    lhd = None
+            if lhd:
+                lhd.timer += dt
+                if lhd.state == "переезд" and lhd.timer > 600:
+                    lhd.state = "выпуск"
+                if lhd.state == "выпуск":
+                    if ch.verdict != "разрешено":
+                        lhd.state = "ожидание (вердикт)"
+                    else:
+                        lhd.hours += dt / 3600
+                        buckets = dt / C.LHD["cycle_s"]
+                        tons = min(ch.remaining, buckets * C.LHD["bucket_t"] * self.rng.uniform(0.9, 1.05))
+                        ch.remaining -= tons
+                        lhd.tonnes_shift += tons
+                        lhd.buckets += buckets
+                        ch.panel.ore_pass_level += tons
+                        ch.panel.ore_pass_total += tons
+                        self.ore_shift += tons
+                elif lhd.state == "ожидание (вердикт)" and ch.verdict == "разрешено":
+                    lhd.state = "выпуск"
+            if ch.remaining <= 0.5:
+                ch.layer += 1
+                ch.panel.layers_mined += 1
+                ch.remaining = 0.0
+                if lhd:
+                    lhd.state, lhd.chamber, ch.lhd = "стоянка", None, None
+                ch.state = "mined_out" if ch.layer >= C.LAYERS_PER_CHAMBER else "idle"
+                ch.dirty = True
+                self.log(f"Камера {ch.id[1:]}: слой {ch.layer} выпущен" + (", камера отработана" if ch.state == "mined_out" else ""))
+                if ch.state == "idle":
+                    ch.state, ch.timer = "drilling", 0.0     # звено продолжает следующий слой
+                    crew.task = ch.state
+                else:
+                    crew.task = "резерв"
+                    crew.state = "выведено"
+                    ch.crew, crew.chamber = None, None
+        if crew:
+            crew.task = ch.state
 
-    def _enter_segment(self, truck):
-        seg, fwd = truck.path.pop(0)
-        truck.seg, truck.fwd, truck.dist = seg, fwd, 0.0
-        seg.trucks += 1
-
-    def _drive(self, truck, dt):
-        seg = truck.seg
-        grade = seg.grade if truck.fwd else -seg.grade
-        truck.speed = self.net.speed_kmh(truck.loaded, grade) * self.rng.uniform(0.95, 1.05)
-        truck.dist += truck.speed / 3.6 * dt
-        if truck.dist >= seg.length:
-            seg.trucks -= 1
-            seg.trips += 1
-            truck.node = seg.b if truck.fwd else seg.a
-            truck.xy = C.NODES[truck.node]["xy"]
-            if truck.path:
-                self._enter_segment(truck)
+    # ------------------------------------------------------------ люди
+    def _step_crews(self, dt):
+        for crew in self.crews:
+            ch = crew.chamber
+            if crew.state == "спуск":
+                crew.timer += dt
+                crew.xy = C.NODES["shaft-cage"]["xy"] if crew.timer < 600 else ((ch.cx, ch.cy) if ch else crew.xy)
+                if crew.timer >= 1200:
+                    crew.state = "в камере" if ch else "резерв"
+            elif crew.state == "в камере":
+                if ch is None:
+                    crew.state = "резерв"
+                    continue
+                crew.xy = (ch.cx, ch.cy)
+                if ch.verdict == "запрещено":
+                    crew.state = "выведено"
+                    crew.timer = 0.0
+                    self.log(f"{crew.name} выведено из камеры {ch.id[1:]}: {ch.reason}")
+                crew.exposure += ch.co * dt / 3600
+            elif crew.state == "выведено":
+                crew.timer += dt
+                node = ch.panel.in_node if ch else "j-main-1"
+                crew.xy = C.NODES[node]["xy"]
+                # вернуться, если камера снова разрешена; иначе ждать переназначения мастером
+                if ch and ch.verdict in ("разрешено", "ограничено") and ch.has_work() and self.t >= ch.panel.evacuated_until:
+                    crew.state = "в камере"
+                elif ch and (not ch.has_work()):
+                    ch.crew, crew.chamber = None, None
+                    crew.state = "резерв"
+            elif crew.state == "резерв":
+                crew.xy = C.NODES["j-main-1"]["xy"]
+                if ch is None and self.auto_plan:
+                    # резервное звено берёт ближайшую разрешённую камеру
+                    cand = [c for c in self.chambers.values() if c.has_work() and c.crew is None and c.verdict == "разрешено"
+                            and c.state not in ("charged", "ventilating")]
+                    if cand:
+                        c = cand[0]
+                        c.crew, crew.chamber, crew.state, crew.timer = crew, c, "спуск", 600.0
+                        if c.state in ("virgin", "idle"):
+                            c.state, c.timer, c.dirty = "drilling", 0.0, True
+            elif crew.state == "на поверхности":
+                crew.xy = C.NODES["shaft-cage"]["xy"]
+        for m in self.lhds + self.jumbos:
+            if m.chamber:
+                m.xy = (m.chamber.cx, m.chamber.cy + 6)
+            elif m.kind == "lhd":
+                m.xy = (C.NODES["j-main-1"]["xy"][0] + 30, C.NODES["j-main-1"]["xy"][1] + 18 * self.lhds.index(m))
             else:
-                truck.seg = None
-                truck.speed = 0.0
-                self._arrive(truck)
-        else:
-            truck.xy = seg.xy(truck.dist / seg.length, truck.fwd)
+                m.xy = (C.NODES["j-main-2"]["xy"][0] + 30, C.NODES["j-main-2"]["xy"][1] + 18 * self.jumbos.index(m))
 
-    def _arrive(self, truck):
-        dst = truck.destination
-        if dst in C.FACE_OF_BENCH.values():
-            ex = truck.excavator
-            if ex is None or ex.state in ("down", "service", "no_block"):
-                truck.state = "idle"          # arrived at a dead face: ask the dispatcher again
-                truck.excavator = None
-                return
-            truck.state = "queued_at_face"
-            truck.timer = 0.0
-            ex.queue.append(truck)
-        elif dst == "crusher":
-            if not self.crusher_up:              # crusher went down while we were hauling
-                self._start_trip(truck, "stockpile" if self.stock_t < C.STOCKPILE["capacity_t"] else "dump")
-                return
-            truck.state = "queued_at_crusher"
-            self.crusher_queue.append(truck)
-        elif dst == "stockpile":
-            truck.state = "queued_at_stockpile"
-            self.stock_queue.append(truck)
-        elif dst == "dump":
-            truck.state = "queued_at_dump"
-            self.dump_queue.append(truck)
-        elif dst == "fuel":
-            if truck.since_service >= C.RELIABILITY["truck"]["service_interval_h"] and not truck.forced_parked:
-                truck.state = "service"          # planned maintenance in the workshop
-                truck.down_timer = C.RELIABILITY["truck"]["service_h"] * 3600
-                self.log(f"{truck.id}: плановое ТО после {truck.since_service:.0f} ч наработки")
-                return
-            truck.state = "queued_at_fuel"
-            self.fuel_queue.append(truck)
-        truck.timer = 0.0
+    # ------------------------------------------------------------ руда
+    def _step_ore(self, dt):
+        draw_total = 0.0
+        for p in self.panels.values():
+            draw = min(p.ore_pass_level, C.CRUSHER_TPH / 3 / 3600 * dt)
+            p.ore_pass_level -= draw
+            draw_total += draw
+        self.crusher_bunker += draw_total
+        crushed = min(self.crusher_bunker, C.CRUSHER_TPH / 3600 * dt)
+        self.crusher_bunker -= crushed
+        self.crusher_total += crushed
+        self.crusher_tph = crushed / dt * 3600 if dt else 0
+        self.hoist_buffer += crushed
+        hoisted = min(self.hoist_buffer, C.HOIST_TPH / 3600 * dt)
+        self.hoist_buffer -= hoisted
+        self.hoist_total += hoisted
+        self.hoist_tph = hoisted / dt * 3600 if dt else 0
+        self.skips = int(self.hoist_total / 25)
 
-    def _dispatch_empty(self, truck):
-        """After dumping: refuel if needed, else go to the best excavator."""
-        if truck.forced_parked:
-            truck.state = "parked"
-            if truck.node != "fuel":
-                self._start_trip(truck, "fuel")
-                truck.state = "to_fuel"
-                truck.destination = "fuel"
-            return
-        if truck.fuel < C.TRUCK["refuel_below_l"] or truck.since_service >= C.RELIABILITY["truck"]["service_interval_h"]:
-            # fuel station and workshop share the "fuel" node: refuel, or planned service when due
-            self._start_trip(truck, "fuel")
-            return
-        ex = self._choose_excavator(truck)
-        if ex is None:
-            truck.state = "idle"
-            truck.excavator = None
-            truck.speed = 0.0
-            return
-        truck.excavator = ex
-        truck.cycle_start = self.t
-        truck.wait_s = 0.0
-        self._start_trip(truck, ex.face)
+    # ------------------------------------------------------------ смена
+    def _shift_change(self):
+        """Пересменка: взрывы заряженных камер, люди на поверхность, сейсмика, новый наряд."""
+        self.shift_no += 1
+        self.shift_elapsed = 0.0
+        for ch in self.chambers.values():
+            if ch.state == "charged":
+                ch.state, ch.blast_t, ch.dirty = "ventilating", self.t, True
+                # взрывные газы: объём CO = ВВ × 40 л/кг в объёме камеры + прилегающих выработок (×3)
+                co_m3 = C.BLAST["explosive_kg"] * C.BLAST["co_l_per_kg"] / 1000
+                ch.co = min(0.5, co_m3 / (C.CHAMBER_VOLUME * 10) * 100)
+                ch.aux_fan = True
+                self.log(f"Камера {ch.id[1:]}: взрыв, CO {ch.co:.3f} %, проветривание")
+        for crew in self.crews:
+            crew.state = "спуск"
+            crew.timer = 0.0
+        for m in self.lhds:
+            m.tonnes_shift = 0.0
+        self.ore_shift = 0.0
+        self._seismic_shift()
+        self._update_ground()
+        self._plan_shift()
 
-    def _step_truck(self, truck, dt):
-        s = truck.state
-        burn = C.TRUCK["fuel_lph"]
-        if s in ("down", "parked", "blocked", "service"):
-            truck.fuel_rate = 0.0
-            truck.speed = 0.0
-            if s == "down":
-                truck.down_timer -= dt
-                if truck.down_timer <= 0:
-                    truck.state = "idle"
-                    self.log(f"{truck.id}: ремонт завершён")
-                    if truck.seg is not None:
-                        truck.state = "hauling" if truck.loaded else "returning"
-                        if truck.destination in C.FACE_OF_BENCH.values():
-                            truck.state = "to_face"
-            elif s == "service":
-                truck.down_timer -= dt
-                if truck.down_timer <= 0:
-                    truck.state = "idle"
-                    truck.health = 100.0
-                    truck.since_service = 0.0
-            elif s == "blocked":
-                # road was closed with no detour: retry every tick until a route exists
-                if self.net.route(truck.node, truck.destination, truck.loaded) is not None:
-                    self._start_trip(truck, truck.destination)
-            elif s == "parked" and not truck.forced_parked:
-                truck.state = "idle"
-            return
-        if s == "idle":
-            truck.fuel_rate = burn["idle"]
-            if truck.node == "fuel" and truck.since_service >= C.RELIABILITY["truck"]["service_interval_h"]:
-                truck.state = "service"
-                truck.down_timer = C.RELIABILITY["truck"]["service_h"] * 3600
-                return
-            self._dispatch_empty(truck)
-        elif s in ("hauling", "returning", "to_face", "to_fuel"):
-            truck.fuel_rate = burn["hauling"] if truck.loaded else burn["returning"]
-            if s == "to_face" and (truck.excavator is None or truck.excavator.state in ("down", "service", "no_block")):
-                # the excavator we were sent to is out: the dispatcher re-assigns on the fly
-                alt = self._choose_excavator(truck)
-                if alt is not None and alt is not truck.excavator:
-                    truck.excavator = alt
-                    self._reroute(truck, alt.face)
-            self._drive(truck, dt)
-        elif s == "queued_at_face":
-            truck.fuel_rate = burn["idle"]
-            truck.wait_s += dt
-        elif s in ("spotting", "loading"):
-            truck.fuel_rate = burn["loading"]
-        elif s in ("queued_at_crusher", "queued_at_stockpile", "queued_at_dump", "queued_at_fuel"):
-            truck.fuel_rate = burn["idle"]
-            truck.wait_s += dt
-        elif s == "dumping":
-            truck.fuel_rate = burn["dumping"]
-        elif s == "refueling":
-            truck.fuel_rate = 0.0
-            truck.fuel = min(C.TRUCK["tank_l"], truck.fuel + C.TRUCK["refuel_rate_lpm"] / 60 * dt)
-            self.diesel_issued += C.TRUCK["refuel_rate_lpm"] / 60 * dt
-            if truck.fuel >= C.TRUCK["tank_l"] - 1:
-                self.fuel_busy = None
-                truck.state = "idle"
-        truck.fuel = max(0.0, truck.fuel - truck.fuel_rate / 3600 * dt)
-        if truck.state not in ("idle", "parked"):
-            truck.hours += dt / 3600
-            truck.since_service += dt / 3600
-            truck.health = max(0.0, 100.0 - 60.0 * truck.since_service / C.RELIABILITY["truck"]["service_interval_h"])
-            # random failure, exponential in operating hours
-            if self.rng.random() < dt / 3600 / C.RELIABILITY["truck"]["mtbf_h"] * (1.5 - truck.health / 200):
-                truck.state = "down"
-                truck.down_timer = C.RELIABILITY["truck"]["mttr_h"] * 3600 * self.rng.uniform(0.5, 1.5)
-                truck.failures += 1
-                truck.speed = 0.0
-                self.log(f"{truck.id}: отказ, ремонт {truck.down_timer / 3600:.1f} ч")
-
-    # ---------------------------------------------------------- excavators
-    def _step_excavator(self, ex, dt):
-        ex.total_s += dt
-        if ex.state in ("down", "service"):
-            ex.down_timer -= dt
-            if ex.down_timer <= 0 and not ex.forced_down:
-                ex.state = "idle" if ex.block else "no_block"
-                if ex.state == "idle":
-                    self.log(f"{ex.id}: снова в работе")
-            return
-        if ex.since_service >= C.RELIABILITY["excavator"]["service_interval_h"] and ex.loading_truck is None:
-            ex.state, ex.down_timer, ex.since_service = "service", C.RELIABILITY["excavator"]["service_h"] * 3600, 0.0
-            self._release_loading(ex)
-            self.log(f"{ex.id}: плановое ТО, {C.RELIABILITY['excavator']['service_h']:.0f} ч")
-            return
-        if ex.block is None:
-            self._next_block(ex)
-            if ex.block is None:
-                return
-        if ex.loading_truck is None:
-            if ex.queue:
-                truck = ex.queue.popleft()
-                ex.loading_truck = truck
-                truck.state = "spotting"
-                truck.timer = 0.0
-                ex.state = "loading"
-            else:
-                ex.state = "waiting"
-                return
-        truck = ex.loading_truck
-        truck.timer += dt
-        ex.busy_s += dt
-        if truck.state == "spotting":
-            if truck.timer >= C.TRUCK["spot_s"]:
-                truck.state = "loading"
-                truck.timer = 0.0
-            return
-        b = ex.block
-        # pass time stretches with coarse fragmentation (Kuz-Ram trend, ASSUMPTION)
-        pass_s = ex.pass_s * (1.0 + max(0.0, b.p80 - 200.0) / 600.0)
-        while truck.timer >= pass_s and truck.payload < C.TRUCK["capacity_t"] - 1 and b.remaining > 0:
-            truck.timer -= pass_s
-            bucket = min(ex.bucket * self.rng.uniform(0.85, 1.05), C.TRUCK["capacity_t"] - truck.payload, b.remaining)
-            truck.grade = (truck.grade * truck.payload + b.grade * bucket) / (truck.payload + bucket)
-            truck.hardness = (truck.hardness * truck.payload + b.hardness * bucket) / (truck.payload + bucket)
-            truck.payload += bucket
-            b.remaining -= bucket
-            b.dirty = True
-            ex.passes += 1
-            ex.tonnes += bucket
-        if truck.payload >= C.TRUCK["capacity_t"] - 1 or (b.remaining <= 0 and truck.payload > 0):
-            truck.material = "ore" if truck.grade >= self.cutoff else "waste"
-            ex.loading_truck = None
-            self.waits.append(truck.wait_s)
-            dst = self._choose_destination(truck)
-            self._start_trip(truck, dst)
-        if b.remaining <= 0:
-            b.status, b.remaining, b.dirty = "mined", 0.0, True
-            self.log(f"Блок {b.id} отработан")
-            self._next_block(ex)
-        ex.hours += dt / 3600
-        ex.since_service += dt / 3600
-        if self.rng.random() < dt / 3600 / C.RELIABILITY["excavator"]["mtbf_h"]:
-            ex.state = "down"
-            ex.down_timer = C.RELIABILITY["excavator"]["mttr_h"] * 3600 * self.rng.uniform(0.5, 1.5)
-            ex.failures += 1
-            self._release_loading(ex)
-            self.log(f"{ex.id}: отказ гидравлики, ремонт {ex.down_timer / 3600:.1f} ч")
-
-    def _release_loading(self, ex):
-        """An excavator went down: a half-loaded truck leaves with what it has."""
-        truck = ex.loading_truck
-        ex.loading_truck = None
-        if truck is not None:
-            if truck.payload > 10:
-                truck.material = "ore" if truck.grade >= self.cutoff else "waste"
-                self._start_trip(truck, self._choose_destination(truck))
-            else:
-                truck.payload = 0.0
-                truck.state = "idle"
-        for t in list(ex.queue):
-            t.state = "idle"
-            t.excavator = None
-        ex.queue.clear()
-
-    # ---------------------------------------------------------- facilities
-    def _serve_dump_point(self, queue, current_attr, dt, on_done):
-        cur = getattr(self, current_attr)
-        if cur is None and queue:
-            cur = queue.popleft()
-            setattr(self, current_attr, cur)
-            cur.state = "dumping"
-            cur.timer = 0.0
-        if cur is not None:
-            cur.timer += dt
-            if cur.timer >= C.TRUCK["dump_s"]:
-                on_done(cur)
-                cur.payload, cur.grade, cur.hardness, cur.material = 0.0, 0.0, 0.0, ""
-                cur.trips += 1
-                self.cycles.append(self.t - cur.cycle_start)
-                setattr(self, current_attr, None)
-                cur.state = "idle"
-                cur.destination = ""
-
-    def _step_facilities(self, dt):
-        def to_crusher(tr):
-            self.crusher_bin += tr.payload
-            self.crusher_bin_grade_t += tr.payload * tr.grade
-            self.crusher_bin_hard_t += tr.payload * tr.hardness
-            self.crusher_feed_log.append((self.t, tr.payload, tr.grade))
-            self.ore_t += tr.payload
-
-        def to_stock(tr):
-            self.stock_t += tr.payload
-            self.stock_grade_t += tr.payload * tr.grade
-            self.ore_t += tr.payload
-
-        def to_dump(tr):
-            self.dump_t += tr.payload
-            self.waste_t += tr.payload
-
-        if self.crusher_up:
-            self._serve_dump_point(self.crusher_queue, "crusher_dumping", dt, to_crusher)
-        self._serve_dump_point(self.stock_queue, "stock_dumping", dt, to_stock)
-        self._serve_dump_point(self.dump_queue, "dump_dumping", dt, to_dump)
-        # fuel station: one bay
-        if self.fuel_busy is None and self.fuel_queue:
-            self.fuel_busy = self.fuel_queue.popleft()
-            self.fuel_busy.state = "refueling"
-        # crusher feed window
-        while self.crusher_feed_log and self.t - self.crusher_feed_log[0][0] > 3600:
-            self.crusher_feed_log.popleft()
-
-        # stockpile reclaim: blend or feed a starved crusher
-        self.stock_reclaim_tph = 0.0
-        feed = self.feed_grade_1h()
-        lo, hi = C.BLEND["target_grade"] - C.BLEND["band"], C.BLEND["target_grade"] + C.BLEND["band"]
-        sg = self.stock_grade()
-        want = False
-        if self.crusher_up and self.stock_t > 50:
-            if self.crusher_bin < 100:
-                want, self.blend_mode = True, "reclaim_starved_crusher"
-            elif feed > hi and sg < feed - 0.02:
-                want, self.blend_mode = True, "reclaim_low_grade_to_blend_down"
-            elif 0 < feed < lo and sg > feed + 0.02:
-                want, self.blend_mode = True, "reclaim_high_grade_to_blend_up"
-        if want:
-            tons = min(C.STOCKPILE["reclaim_tph"] / 3600 * dt, self.stock_t,
-                       max(0.0, C.CRUSHER["bin_capacity_t"] - self.crusher_bin))
-            if tons > 0:
-                self.stock_reclaim_tph = tons / dt * 3600
-                self.stock_t -= tons
-                self.stock_grade_t -= tons * sg
-                self.crusher_bin += tons
-                self.crusher_bin_grade_t += tons * sg
-                self.crusher_bin_hard_t += tons * 14.0
-                self.crusher_feed_log.append((self.t, tons, sg))
-        elif self.blend_mode != "normal" and lo <= feed <= hi:
-            self.blend_mode = "normal"
-
-        # crusher -> mill -> flotation
-        if self.crusher_up and self.crusher_bin > 0:
-            # coarse blast fragmentation lowers crusher throughput (ASSUMPTION: -15 % at P80 350 mm)
-            p80s = [b.p80 for ex in self.excavators if (b := ex.block) and b.p80]
-            p80 = sum(p80s) / len(p80s) if p80s else 220.0
-            self.crusher_p80_factor = max(0.7, min(1.0, 1.15 - p80 / 1000.0))
-            rate = C.CRUSHER["rated_tph"] * self.crusher_p80_factor
-            tons = min(rate / 3600 * dt, self.crusher_bin)
-            g = self.crusher_bin_grade_t / self.crusher_bin
-            h = self.crusher_bin_hard_t / self.crusher_bin
-            self.crusher_bin -= tons
-            self.crusher_bin_grade_t -= tons * g
-            self.crusher_bin_hard_t -= tons * h
-            self.crusher_tph = tons / dt * 3600
-            self.crusher_total += tons
-            self.mill_tph = min(self.crusher_tph, C.MILL["rated_tph"])
-            self.mill_grade = g
-            self.mill_total += tons
-            bond = lambda wi, f, p: 10 * wi * (1 / math.sqrt(p) - 1 / math.sqrt(f))
-            self.crusher_power = C.CRUSHER["no_load_kw"] + bond(h, C.CRUSHER["f80_um"], C.CRUSHER["p80_um"]) * self.crusher_tph
-            self.mill_specific = bond(h, C.MILL["f80_um"], C.MILL["p80_um"])
-            self.mill_power = C.MILL["no_load_kw"] + self.mill_specific * self.mill_tph
-            F = C.FLOTATION
-            rec = F["base_recovery"]
-            if g < F["grade_knee"]:
-                rec -= (F["base_recovery"] - F["recovery_at_floor"]) * (F["grade_knee"] - g) / F["grade_knee"]
-            rec -= F["hardness_penalty_per_kwh"] * max(0.0, h - 14.0)
-            self.recovery = max(0.4, rec)
-            cu_tph = self.mill_tph * g / 100 * self.recovery
-            self.conc_tph = cu_tph / (F["concentrate_grade"] / 100)
-            self.conc_total += self.conc_tph / 3600 * dt
-            self.cu_total += cu_tph / 3600 * dt
-            self.tail_grade = g * (1 - self.recovery)
-        else:
-            self.crusher_tph = self.mill_tph = self.conc_tph = 0.0
-            self.crusher_power = C.CRUSHER["no_load_kw"] if self.crusher_up else 0.0
-            self.mill_power = C.MILL["no_load_kw"]
-            self.recovery = 0.0
-
-        # power and diesel
-        self.load_kw = C.POWER["base_kw"] + self.crusher_power + self.mill_power
-        self.energy_kwh += self.load_kw / 3600 * dt
-        rate = sum(t.fuel_rate for t in self.trucks)
-        for ex in self.excavators:
-            rate += EXCAVATOR_LPH.get(ex.state, 0.0)
-        self.diesel_rate = rate
-        self.diesel_l += rate / 3600 * dt
-
-    # ------------------------------------------------------------ stepping
+    # ------------------------------------------------------------ шаг
     def step(self, dt):
         self.t += dt
-        self._step_prep(dt)
-        for ex in self.excavators:
-            self._step_excavator(ex, dt)
-        for truck in self.trucks:
-            self._step_truck(truck, dt)
-        self._step_facilities(dt)
+        self.shift_elapsed += dt
+        if self.shift_elapsed >= C.SHIFT_H * 3600:
+            self._shift_change()
+        if int(self.t / dt) % 15 == 0:
+            self._update_ground()
+        self._ventilate(dt)
+        self._update_verdicts()
+        for ch in self.chambers.values():
+            self._step_chamber(ch, dt)
+        self._step_crews(dt)
+        self._step_ore(dt)
+        bad = [s for s in self.sensors.values() if s["alarm"] not in ("норма",)]
+        forb_with_people = [c for c in self.chambers.values() if c.verdict == "запрещено" and c.people]
+        self.alarm = ("АГК: " + ", ".join(f"{sid}:{s['alarm']}" for sid, s in self.sensors.items() if s["alarm"] != "норма")) if bad \
+            else ("люди в запрещённой камере " + forb_with_people[0].id[1:]) if forb_with_people else "нет"
 
-    def run(self, seconds, dt=2.0):
-        n = int(seconds / dt)
-        for _ in range(n):
+    def run(self, seconds, dt=10.0):
+        for _ in range(int(seconds / dt)):
             self.step(dt)
 
-    # ---------------------------------------------------------- scenarios
+    # ------------------------------------------------------------ сценарии
     def command(self, cmd):
-        """Apply a what-if scenario. cmd = {"action": ..., ...}. Returns a text."""
         a = cmd.get("action")
         on = bool(cmd.get("on", True))
-        if a == "excavator_down":
-            ex = next((e for e in self.excavators if e.id == cmd.get("target")), None)
-            if ex is None:
-                return "unknown excavator"
-            ex.forced_down = on
-            if on:
-                ex.state, ex.down_timer = "down", 1e12
-                self._release_loading(ex)
-                self.scenarios[f"excavator_down:{ex.id}"] = True
+        net = self.net
+        if a == "fan":
+            pct = float(cmd.get("speed_pct", 100))
+            net.fan_speed = max(0.0, min(1.2, pct / 100))
+            net.fan_on = pct > 0
+            if abs(pct - 100) < 1e-6:
+                self.scenarios.pop("fan", None)
             else:
-                ex.down_timer = 0.0
-                ex.state = "idle" if ex.block else "no_block"
-                self.scenarios.pop(f"excavator_down:{ex.id}", None)
-            self.log(f"Сценарий: {ex.id} {'остановлен' if on else 'возвращён в работу'}")
-        elif a == "crusher_down":
-            self.crusher_forced_down = on
-            self.crusher_up = not on
-            if on:
-                self.scenarios["crusher_down"] = True
-                self.crusher_dumping = None
-                for t in list(self.crusher_queue):
-                    self.crusher_queue.remove(t)
-                    self._start_trip(t, "stockpile")
-                for t in self.trucks:
-                    if t.state == "hauling" and t.destination == "crusher":
-                        self._reroute(t, "stockpile")
+                self.scenarios["fan"] = f"{pct:.0f}%"
+            self.log(f"Сценарий: ВГП {'остановлен' if pct <= 0 else f'на {pct:.0f} %'}")
+        elif a == "door":
+            aw = net.airways.get(cmd.get("target", "aw-door-3"))
+            if not aw or not aw.door:
+                return "unknown door"
+            aw.door_open = on if aw.door == "door" else (not on)   # для регулятора on = закрыть
+            key = f"door:{aw.id}"
+            default_open = aw.door == "regulator"
+            if aw.door_open == default_open:
+                self.scenarios.pop(key, None)
             else:
-                self.scenarios.pop("crusher_down", None)
-            self.log(f"Сценарий: дробилка {'остановлена' if on else 'запущена'}")
-        elif a == "road_closed":
-            seg = self.net.segments.get(cmd.get("target"))
-            if seg is None:
-                return "unknown road"
-            seg.open = not on
-            key = f"road_closed:{seg.id}"
+                self.scenarios[key] = "открыта" if aw.door_open else "закрыт"
+            self.log(f"Сценарий: {aw.id} {'открыта' if aw.door_open else 'закрыт(а)'}")
+        elif a == "regulator":
+            # прикрыть регулятор панели на pct %: добавочное сопротивление (ДОПУЩЕНИЕ: до 8·R0 при 100 %)
+            aw = net.airways.get(cmd.get("target", "aw-p1-vent"))
+            if not aw or aw.door != "regulator":
+                return "unknown regulator"
+            pct = max(0.0, min(95.0, float(cmd.get("closed_pct", 0))))
+            aw.regulator_extra = aw.R0 * 8.0 * (pct / 100) / max(0.05, 1 - pct / 100)
+            key = f"regulator:{aw.id}"
+            if pct <= 0:
+                self.scenarios.pop(key, None)
+            else:
+                self.scenarios[key] = f"{pct:.0f}%"
+            self.log(f"Регулятор {aw.id}: прикрыт на {pct:.0f} %")
+        elif a == "blocked":
+            aw = net.airways.get(cmd.get("target"))
+            if not aw:
+                return "unknown airway"
+            aw.blocked = on
+            key = f"blocked:{aw.id}"
             if on:
                 self.scenarios[key] = True
-                # trucks already on the segment finish it; new routes avoid it
-                for t in self.trucks:
-                    if t.path and any(s is seg for s, _ in t.path):
-                        rest = self.net.route(t.seg.b if t.fwd else t.seg.a, t.destination, t.loaded) if t.seg else None
-                        if rest is not None:
-                            t.path = rest
-                        else:
-                            t.path = []
-                            t.state = "blocked"
             else:
                 self.scenarios.pop(key, None)
-                for t in self.trucks:
-                    if t.state == "blocked":
-                        self._start_trip(t, t.destination)
-            self.log(f"Сценарий: дорога {seg.id} {'закрыта' if on else 'открыта'}")
-        elif a == "fleet":
-            n = int(cmd.get("count", C.TRUCK_COUNT))
-            n = max(1, min(C.TRUCK_COUNT, n))
-            self.fleet_target = n
-            for t in self.trucks:
-                t.forced_parked = t.idx > n
-                if not t.forced_parked and t.state == "parked":
-                    t.state = "idle"
-            if n == C.TRUCK_COUNT:
-                self.scenarios.pop("fleet", None)
+            self.log(f"Сценарий: {aw.id} {'завалена (обрушение)' if on else 'расчищена'}")
+        elif a == "extra_diesel":
+            p = self.panels.get(cmd.get("target", "panel-1"))
+            if not p:
+                return "unknown panel"
+            p.extra_diesel_kw = float(cmd.get("kw", C.TRUCK["kw"])) if on else 0.0
+            key = f"extra_diesel:{p.id}"
+            if on:
+                self.scenarios[key] = f"{p.extra_diesel_kw:.0f}kW"
             else:
-                self.scenarios["fleet"] = n
-            self.log(f"Сценарий: в работе {n} самосвалов")
-        elif a == "cutoff":
-            v = float(cmd.get("value", C.CUTOFF_GRADE))
-            self.cutoff = max(0.05, min(1.0, v))
-            if abs(self.cutoff - C.CUTOFF_GRADE) < 1e-6:
-                self.scenarios.pop("cutoff", None)
+                self.scenarios.pop(key, None)
+            self.log(f"Сценарий: в {p.name} {'заехал самосвал ' + C.TRUCK['model'] if on else 'самосвал выехал'}")
+        elif a == "seismic":
+            p = self.panels.get(cmd.get("target", "panel-3"))
+            if not p:
+                return "unknown panel"
+            e = float(cmd.get("energy", 120000))
+            p.max_bump, p.energy_shift, p.bumps_shift = e, p.energy_shift + e, p.bumps_shift + 1
+            p.evacuated_until = self.t + C.SEISMIC["evacuate_h"] * 3600
+            p.hazard, p.seismic_class = "высокая", "b"
+            for pl in p.pillars:
+                if not pl.extracted:
+                    pl.damage = min(1.0, pl.damage + 0.12)
+            self._update_ground()
+            self.scenarios[f"seismic:{p.id}"] = f"{e:.0f}J"
+            self.log(f"Сценарий: толчок {e:.0f} Дж в {p.name}, вывод людей на {C.SEISMIC['evacuate_h']:.0f} ч")
+        elif a == "pillar_extract":
+            pl = self.pillars.get(cmd.get("target"))
+            if not pl:
+                return "unknown pillar"
+            pl.extracted = on
+            pl.dirty = True
+            key = f"pillar_extract:{pl.id}"
+            if on:
+                self.scenarios[key] = True
             else:
-                self.scenarios["cutoff"] = self.cutoff
-            for b in self.blocks:
-                b.dirty = True
-            self.log(f"Сценарий: бортовое содержание {self.cutoff} % Cu")
-        elif a == "truck_down":
-            t = next((x for x in self.trucks if x.id == cmd.get("target")), None)
-            if t is None:
-                return "unknown truck"
-            if on and t.state not in ("down",):
-                if t.excavator and t in t.excavator.queue:
-                    t.excavator.queue.remove(t)
-                if t.excavator and t.excavator.loading_truck is t:
-                    t.excavator.loading_truck = None
-                t.state, t.down_timer = "down", C.RELIABILITY["truck"]["mttr_h"] * 3600
-                self.log(f"Сценарий: {t.id} выведен в ремонт")
+                self.scenarios.pop(key, None)
+                pl.damage = 0.0
+            self._update_ground()
+            self.log(f"Сценарий: целик {pl.id[1:]} {'извлечён' if on else 'восстановлен'}")
+        elif a == "aux_fan_fail":
+            ch = self.chambers.get(cmd.get("target"))
+            if not ch:
+                return "unknown chamber"
+            ch.aux_fan_failed = on
+            ch.dirty = True
+            key = f"aux_fan_fail:{ch.id}"
+            if on:
+                self.scenarios[key] = True
+            else:
+                self.scenarios.pop(key, None)
+            self.log(f"Сценарий: ВМП камеры {ch.id[1:]} {'отказал' if on else 'восстановлен'}")
+        elif a == "assign":
+            crew_id, ch_id = cmd.get("crew"), cmd.get("chamber")
+            crew = next((c for c in self.crews if c.id == crew_id), None)
+            if crew is None:
+                return "unknown crew"
+            if not ch_id:
+                self.manual_plan.pop(crew_id, None)
+                self.last_change = f"{crew.name}: снято с наряда"
+            else:
+                ch = self.chambers.get(ch_id)
+                if ch is None:
+                    return "unknown chamber"
+                if ch.verdict == "запрещено" or not ch.has_work():
+                    self.rejected = f"{crew.name} → {ch.id[1:]}: {ch.verdict} — {ch.reason}"
+                    self.log(f"Наряд отклонён: {self.rejected}")
+                    return "rejected: " + ch.reason
+                self.manual_plan[crew_id] = ch_id
+                self.last_change = f"{crew.name} → камера {ch.id[1:]} ({ch.verdict})"
+                # применить сразу
+                if crew.chamber and crew.chamber.crew is crew:
+                    crew.chamber.crew = None
+                if ch.crew and ch.crew is not crew:
+                    ch.crew.chamber, ch.crew.state = None, "резерв"
+                ch.crew, crew.chamber, crew.state, crew.timer = crew, ch, "спуск", 600.0
+                if ch.state in ("virgin", "idle"):
+                    ch.state, ch.timer, ch.dirty = "drilling", 0.0, True
+                self.log(f"Наряд мастера: {self.last_change}")
+        elif a == "auto_plan":
+            self.auto_plan = on
+            self.log(f"Автонаряд {'включён' if on else 'выключен'}")
         elif a == "reset":
             for key in list(self.scenarios):
-                if key.startswith("excavator_down:"):
-                    self.command({"action": "excavator_down", "target": key.split(":")[1], "on": False})
-                elif key.startswith("road_closed:"):
-                    self.command({"action": "road_closed", "target": key.split(":")[1], "on": False})
-            if self.crusher_forced_down:
-                self.command({"action": "crusher_down", "on": False})
-            self.command({"action": "fleet", "count": C.TRUCK_COUNT})
-            self.command({"action": "cutoff", "value": C.CUTOFF_GRADE})
+                k, _, v = key.partition(":")
+                if k == "door":
+                    self.command({"action": "door", "target": v, "on": False if net.airways[v].door == "door" else False})
+                    aw = net.airways[v]
+                    aw.door_open = aw.door == "regulator"
+                elif k == "blocked":
+                    self.command({"action": "blocked", "target": v, "on": False})
+                elif k == "regulator":
+                    self.command({"action": "regulator", "target": v, "closed_pct": 0})
+                elif k == "extra_diesel":
+                    self.command({"action": "extra_diesel", "target": v, "on": False})
+                elif k == "pillar_extract":
+                    self.command({"action": "pillar_extract", "target": v, "on": False})
+                elif k == "aux_fan_fail":
+                    self.command({"action": "aux_fan_fail", "target": v, "on": False})
+            net.fan_speed, net.fan_on = 1.0, True
+            for p in self.panels.values():
+                p.evacuated_until = 0.0
+                p.hazard = "низкая"
+                p.seismic_class = p.seismic_class_initial
+                for pl in p.pillars:
+                    pl.damage = 0.0
+            self.manual_plan.clear()
             self.scenarios.clear()
+            self._update_ground()
             self.log("Сценарии сброшены")
         else:
             return f"unknown action {a}"
+        self._ventilate(0.0)
+        self._update_verdicts()
         return "ok"
 
-    # ------------------------------------------------------------ snapshot
-    def snapshot(self, all_blocks=False):
-        """Features of every twin that changed. Blocks only when dirty (or all_blocks)."""
+    # ------------------------------------------------------------ снимок
+    def snapshot(self):
         f = lambda v, u=None: {"value": v, **({"unit": u} if u else {})}
-        things = {}
-        active = sum(1 for t in self.trucks if t.state not in ("down", "parked", "service"))
-        avail = 100.0 * sum(1 for t in self.trucks if t.state not in ("down", "service")) / len(self.trucks)
-        things[C.MINE_ID] = {
-            "sim_time_h": f(round(self.t / 3600, 2), "h"),
-            "ore_mined_t": f(round(self.ore_t), "t"),
-            "waste_mined_t": f(round(self.waste_t), "t"),
-            "strip_ratio": f(round(self.waste_t / self.ore_t, 2) if self.ore_t else 0, "t/t"),
-            "concentrate_t": f(round(self.conc_total, 1), "t"),
-            "copper_in_concentrate_t": f(round(self.cu_total, 2), "t Cu"),
-            "trucks_active": f(active, "trucks"),
-            "fleet_availability_pct": f(round(avail, 1), "%"),
+        th = {}
+        verdicts = [c.verdict for c in self.chambers.values()]
+        th[C.MINE_ID] = {
+            "sim_time_h": f(round(self.t / 3600, 2), "ч"), "shift_no": f(self.shift_no), "shift_phase": f(self.shift_phase),
+            "people_underground": f(sum(c.size for c in self.crews if c.state not in ("на поверхности",)), "чел"),
+            "ore_hoisted_t": f(round(self.hoist_total), "т"), "ore_shift_t": f(round(self.ore_shift), "т"),
+            "chambers_allowed": f(verdicts.count("разрешено")), "chambers_restricted": f(verdicts.count("ограничено")),
+            "chambers_forbidden": f(verdicts.count("запрещено")),
+            "alarm": f(self.alarm),
             "active_scenarios": f(", ".join(f"{k}={v}" if v is not True else k for k, v in self.scenarios.items()) or "none"),
         }
-        for ex in self.excavators:
-            things[ex.id] = {
-                "state": f(ex.state), "block": f(ex.block.id if ex.block else ""),
-                "face_grade": f(ex.block.grade if ex.block else 0, "% Cu"),
-                "passes_total": f(ex.passes, "passes"), "tonnes_loaded": f(round(ex.tonnes), "t"),
-                "queue": f(len(ex.queue) + (1 if ex.loading_truck else 0), "trucks"),
-                "utilization_pct": f(round(100 * ex.busy_s / ex.total_s, 1) if ex.total_s else 0, "%"),
-                "hours": f(round(ex.hours, 1), "h"),
-                "health_pct": f(round(max(0, 100 - 60 * ex.since_service / C.RELIABILITY["excavator"]["service_interval_h"]), 1), "%"),
-            }
-        for t in self.trucks:
-            things[t.id] = {
-                "state": f(t.state), "x": f(round(t.xy[0], 1), "m"), "y": f(round(t.xy[1], 1), "m"),
-                "road": f(t.seg.id if t.seg else ""), "destination": f(t.destination),
-                "payload": f(round(t.payload, 1), "t"), "material": f(t.material),
-                "load_grade": f(round(t.grade, 3), "% Cu"), "speed": f(round(t.speed, 1), "km/h"),
-                "fuel": f(round(t.fuel), "L"), "fuel_rate": f(round(t.fuel_rate, 1), "L/h"),
-                "trips_total": f(t.trips, "trips"), "hours": f(round(t.hours, 1), "h"),
-                "health_pct": f(round(t.health, 1), "%"), "assigned_excavator": f(t.excavator.id if t.excavator else ""),
-            }
-        for seg in self.net.segments.values():
-            things[seg.id] = {"status": f("open" if seg.open else "closed"), "trucks_on_road": f(seg.trucks, "trucks"),
-                              "trips_total": f(seg.trips, "trips")}
-        for node_id in C.NODES:
-            q = {"crusher": self.crusher_queue, "stockpile": self.stock_queue, "dump": self.dump_queue,
-                 "fuel": self.fuel_queue}.get(node_id)
-            if node_id in C.FACE_OF_BENCH.values():
-                ex = next(e for e in self.excavators if e.face == node_id)
-                things[node_id] = {"queue": f(len(ex.queue), "trucks")}
-            elif q is not None:
-                things[node_id] = {"queue": f(len(q), "trucks")}
-        things["crusher"].update({
-            "state": f("crushing" if self.crusher_up and self.crusher_tph > 0 else "idle" if self.crusher_up else "down"),
-            "throughput": f(round(self.crusher_tph), "t/h"), "feed_grade": f(round(self.feed_grade_1h(), 3), "% Cu"),
-            "bin_level": f(round(self.crusher_bin), "t"), "power": f(round(self.crusher_power), "kW"),
-            "tonnes_total": f(round(self.crusher_total), "t")})
-        things["stockpile"].update({"tonnes": f(round(self.stock_t), "t"), "grade": f(round(self.stock_grade(), 3), "% Cu"),
-                                    "reclaiming": f(round(self.stock_reclaim_tph), "t/h")})
-        things["dump"].update({"tonnes": f(round(self.dump_t), "t")})
-        things["fuel"].update({"diesel_issued_l": f(round(self.diesel_issued), "L")})
-        things["mill"] = {"state": f("grinding" if self.mill_tph > 0 else "idle"), "throughput": f(round(self.mill_tph), "t/h"),
-                          "feed_grade": f(round(self.mill_grade, 3), "% Cu"), "specific_energy": f(round(self.mill_specific, 2), "kWh/t"),
-                          "power": f(round(self.mill_power), "kW"), "tonnes_total": f(round(self.mill_total), "t")}
-        things["flotation"] = {"recovery": f(round(100 * self.recovery, 1), "%"), "concentrate_tph": f(round(self.conc_tph, 1), "t/h"),
-                               "concentrate_total": f(round(self.conc_total, 1), "t"), "tailings_grade": f(round(self.tail_grade, 3), "% Cu")}
-        things["plant"] = {"state": f("running" if self.mill_tph > 0 else "starved" if self.crusher_up else "crusher_down")}
-        co2 = self.diesel_l * C.POWER["diesel_co2_kg_per_l"] / 1000 + self.energy_kwh * C.POWER["grid_co2_kg_per_kwh"] / 1000
-        things["substation"] = {"load": f(round(self.load_kw), "kW"), "load_pct": f(round(100 * self.load_kw / (C.POWER["substation_mva"] * 1000), 1), "%"),
-                                "energy_total": f(round(self.energy_kwh), "kWh"), "diesel_rate": f(round(self.diesel_rate), "L/h"),
-                                "diesel_total": f(round(self.diesel_l), "L"), "co2_total": f(round(co2, 1), "t CO2")}
-        things["dispatcher"] = {
-            "assignments": f("; ".join(f"{t.id}->{t.excavator.id}" for t in self.trucks if t.excavator) or "none"),
-            "avg_cycle_min": f(round(sum(self.cycles) / len(self.cycles) / 60, 1) if self.cycles else 0, "min"),
-            "avg_queue_min": f(round(sum(self.waits) / len(self.waits) / 60, 1) if self.waits else 0, "min"),
-            "blend_mode": f(self.blend_mode)}
-        for bench, blocks in self.blocks_by_bench.items():
-            things[bench] = {"blocks_mined": f(sum(1 for b in blocks if b.status == "mined"), "blocks"),
-                             "tonnes_remaining": f(round(sum(b.remaining for b in blocks)), "t")}
-        for b in self.blocks:
-            if b.dirty or all_blocks:
-                things[b.id] = {"status": f(b.status), "tonnes_remaining": f(round(b.remaining), "t"),
-                                "fragmentation_p80_mm": f(b.p80, "mm"),
-                                "material": f("ore" if b.grade >= self.cutoff else "waste")}
-                b.dirty = False
-        return things
+        net = self.net
+        th["fan-main"] = {"state": f("работает" if net.fan_on and net.fan_speed > 0 else "остановлен"),
+                          "speed_pct": f(round(net.fan_speed * 100)), "q": f(round(net.fan_q, 1), "м3/с"),
+                          "pressure": f(round(net.fan_p), "Па"), "power": f(round(C.FAN["power_kw"] * net.fan_speed ** 3 * (1 if net.fan_on else 0)), "кВт")}
+        for nid in C.NODES:
+            people = sum(c.size for c in self.crews if c.xy == C.NODES[nid]["xy"] and c.state not in ("на поверхности",))
+            d = {"people": f(people, "чел")}
+            if nid.startswith("shaft"):
+                d["q"] = f(round(abs(net.airways[f"shaft:{nid}"].q), 1), "м3/с")
+                d["mode"] = f("исходящая" if nid == "shaft-vent" else "свежая")
+            if nid == "crusher":
+                d.update({"state": f("дробит" if self.crusher_tph > 1 else "ожидание"), "throughput": f(round(self.crusher_tph), "т/ч"),
+                          "bunker": f(round(self.crusher_bunker), "т"), "tonnes_total": f(round(self.crusher_total), "т")})
+            th[nid] = d
+        th["hoist"] = {"state": f("подъём" if self.hoist_tph > 1 else "ожидание"), "throughput": f(round(self.hoist_tph), "т/ч"),
+                       "tonnes_total": f(round(self.hoist_total), "т"), "skips_total": f(self.skips)}
+        for aw in net.airways.values():
+            if aw.id.startswith("shaft:"):
+                continue
+            th[aw.id] = {"status": f("blocked" if aw.blocked else "open"), "q": f(round(abs(aw.q), 1), "м3/с"),
+                         "velocity": f(round(aw.velocity, 2), "м/с"), "direction": f(1 if aw.q >= 0 else -1),
+                         "co": f(round(aw.co, 5), "% об."), "no2": f(round(aw.no2, 6), "% об."), "temp": f(round(aw.temp, 1), "°C"),
+                         "door_state": f(("открыта" if aw.door_open else "закрыта") if aw.door == "door" else ("открыт" if aw.door_open else "закрыт") if aw.door else ""),
+                         "people": f(aw.people, "чел"), "vehicles": f(aw.vehicles)}
+        for sid, s in self.sensors.items():
+            th[sid] = {"co": f(round(s["co"], 5), "% об."), "no2": f(round(s["no2"], 6), "% об."), "co2": f(round(0.1 + s["co"] * 20, 3), "% об."),
+                       "o2": f(round(20.9 - s["co"] * 30, 2), "% об."), "temp": f(round(s["temp"], 1), "°C"),
+                       "velocity": f(round(s["v"], 2), "м/с"), "alarm": f(s["alarm"])}
+        for p in self.panels.values():
+            active = [c for c in p.chambers if c.aux_fan]
+            th[p.id] = {"q_in": f(round(p.q_in, 1), "м3/с"), "chambers_active": f(len(active)),
+                        "people": f(sum(c.people for c in p.chambers), "чел"), "diesel_kw": f(round(sum(c.diesel_kw for c in p.chambers) + p.extra_diesel_kw), "кВт"),
+                        "air_required": f(round(sum(c.air_required for c in p.chambers) + C.AIR["per_diesel_kw_m3min"] * p.extra_diesel_kw), "м3/мин"),
+                        "air_available": f(round(p.q_in * 60), "м3/мин"),
+                        "seismic_class": f(p.seismic_class), "bumps_shift": f(p.bumps_shift), "seismic_energy_shift": f(p.energy_shift, "Дж"),
+                        "max_bump_energy": f(p.max_bump, "Дж"), "hazard": f(p.hazard),
+                        "evacuated_until_h": f(round(p.evacuated_until / 3600, 2) if p.evacuated_until > self.t else 0, "ч"),
+                        "extraction_ratio": f(round(C.EXTRACTION_RATIO + 0.06 * sum(1 for pl in p.pillars if pl.extracted) / max(1, len(p.pillars)), 3)),
+                        "layers_mined": f(p.layers_mined),
+                        "status": f("эвакуация" if p.evacuated_until > self.t else "работа" if active else "простой")}
+            th[p.ore_pass] = {"level": f(round(p.ore_pass_level), "т"), "state": f("выпуск" if p.ore_pass_level > 1 else "ожидание"),
+                              "tonnes_total": f(round(p.ore_pass_total), "т")}
+        for ch in self.chambers.values():
+            stage_h = C.CYCLE_H.get(ch.state)
+            prog = min(100, round(100 * ch.timer / 3600 / stage_h)) if stage_h else (round(100 * (1 - ch.remaining / C.CHAMBER_TONNES)) if ch.state == "mucking" else 0)
+            th[ch.id] = {"state": f(ch.state), "layer": f(ch.layer), "tonnes_remaining": f(round(ch.remaining), "т"),
+                         "crew": f(ch.crew.id if ch.crew else ""), "equipment": f(", ".join(m.id for m in (ch.lhd, ch.jumbo) if m)),
+                         "people": f(ch.people, "чел"), "diesel_kw": f(round(ch.diesel_kw), "кВт"),
+                         "air": f(round(ch.air), "м3/мин"), "air_required": f(round(ch.air_required), "м3/мин"),
+                         "co": f(round(ch.co, 5), "% об."), "no2": f(round(ch.no2, 6), "% об."), "temp": f(round(ch.temp, 1), "°C"),
+                         "aux_fan": f("отказ" if ch.aux_fan_failed else "вкл" if ch.aux_fan else "выкл"),
+                         "verdict": f(ch.verdict), "reason": f(ch.reason),
+                         "reentry_in": f(max(0, round(C.AIR["blast_reentry_min"] - (self.t - ch.blast_t) / 60)) if ch.state == "ventilating" and ch.blast_t else 0, "мин"),
+                         "stage_progress": f(prog, "%")}
+        for pl in self.pillars.values():
+            th[pl.id] = {"height": f(round(pl.h, 1), "м"), "strength": f(round(pl.strength, 1), "МПа"), "stress": f(round(pl.stress, 1), "МПа"),
+                         "sf": f(round(pl.sf, 2)), "convergence": f(pl.convergence, "мм/сут"), "status": f(pl.status), "extracted": f(pl.extracted)}
+        for crew in self.crews:
+            th[crew.id] = {"chamber": f(crew.chamber.id if crew.chamber else ""), "task": f(crew.task), "state": f(crew.state),
+                           "people": f(crew.size, "чел"), "x": f(round(crew.xy[0], 1), "м"), "y": f(round(crew.xy[1], 1), "м"),
+                           "exposure_co": f(round(crew.exposure, 5), "%·ч")}
+        for m in self.lhds:
+            th[m.id] = {"chamber": f(m.chamber.id if m.chamber else ""), "state": f(m.state),
+                        "kw_running": f(C.LHD["kw"] if m.state == "выпуск" else 0, "кВт"), "tonnes_shift": f(round(m.tonnes_shift), "т"),
+                        "buckets_total": f(int(m.buckets)), "hours": f(round(m.hours, 1), "ч"), "x": f(round(m.xy[0], 1), "м"), "y": f(round(m.xy[1], 1), "м")}
+        for m in self.jumbos:
+            th[m.id] = {"chamber": f(m.chamber.id if m.chamber else ""), "state": f(m.state),
+                        "kw_running": f(C.JUMBO["kw_tramming"] if m.state == "переезд" else 0, "кВт"), "rounds_total": f(m.rounds),
+                        "x": f(round(m.xy[0], 1), "м"), "y": f(round(m.xy[1], 1), "м")}
+        th["shift-plan"] = {"shift_no": f(self.shift_no), "plan": f(getattr(self, "plan_text", "")), "auto": f(self.auto_plan),
+                            "last_change": f(self.last_change), "rejected": f(self.rejected)}
+        return th

@@ -1,8 +1,0 @@
-apiVersion: 1
-providers:
-  - name: sarybulak
-    folder: Sarybulak Mine
-    type: file
-    allowUiUpdates: true
-    options:
-      path: /var/lib/grafana/sarybulak-dashboards

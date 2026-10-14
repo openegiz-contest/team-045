@@ -1,1 +1,1 @@
-"""Sarybulak digital mine on OpenEgiz: twins, simulator, dispatcher, scenario control."""
+"""Цифровой двойник горизонта ВЖР на OpenEgiz: двойники, симулятор, наряд, сценарии."""

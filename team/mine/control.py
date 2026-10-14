@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Mine map and what-if scenario panel.
+План горизонта и панель наряда / сценариев.
 
-Serves a live 2D map of the Sarybulak pit. All data on the map comes from the
+Serves a live 2D plan of the East Zhezkazgan level. All data on the map comes from the
 platform: on start the twins are loaded from Ditto's search API (attributes
 hold the geometry, features the live state); afterwards Ditto's own change
 events, which the platform republishes on MQTT `opentwins/twin/events/#`,
 keep the cache current. The page polls /api/state once a second.
 
 Scenario buttons POST /api/command; the command is published on MQTT
-`sarybulak/commands`, where the simulator picks it up.
+`zhezkazgan/commands`, where the simulator picks it up.
 """
 
 import base64
@@ -35,8 +35,8 @@ DITTO_AUTH = "Basic " + base64.b64encode(f"ditto:{os.environ.get('DITTO_PASSWORD
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 PORT = int(os.environ.get("PORT", "8095"))
-COMMAND_TOPIC = "sarybulak/commands"
-EVENT_TOPIC = "sarybulak/events"
+COMMAND_TOPIC = "zhezkazgan/commands"
+EVENT_TOPIC = "zhezkazgan/events"
 DITTO_EVENTS = f"opentwins/twin/events/{C.NAMESPACE}/#"
 
 
@@ -119,7 +119,7 @@ def mqtt_setup():
         else:
             cache.apply_event(payload)
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"sarybulak-control-{os.getpid()}")
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"zhezkazgan-control-{os.getpid()}")
     client.on_connect = on_connect
     client.on_message = on_message
     while True:
@@ -139,7 +139,7 @@ def ditto_loader():
         try:
             n = cache.load_from_ditto()
             log.info("loaded %d twins from Ditto", n)
-            if n >= 60:
+            if n >= 150:
                 time.sleep(60)
             else:
                 time.sleep(5)
@@ -149,37 +149,33 @@ def ditto_loader():
 
 
 SCENARIOS = [
-    {"id": "excavator_down:excavator-01", "title": "Отказ экскаватора ЭКГ-1 (уступ 545)",
-     "cmd": {"action": "excavator_down", "target": "excavator-01", "on": True},
-     "undo": {"action": "excavator_down", "target": "excavator-01", "on": False},
-     "effect": "Диспетчер переназначает самосвалы на ЭКГ-2, очередь у забоя 530 растёт, добыча падает"},
-    {"id": "excavator_down:excavator-02", "title": "Отказ экскаватора ЭКГ-2 (уступ 530)",
-     "cmd": {"action": "excavator_down", "target": "excavator-02", "on": True},
-     "undo": {"action": "excavator_down", "target": "excavator-02", "on": False},
-     "effect": "Весь парк едет к ЭКГ-1; если он на породе, питание фабрики идёт только со склада"},
-    {"id": "crusher_down", "title": "Остановка дробилки",
-     "cmd": {"action": "crusher_down", "on": True}, "undo": {"action": "crusher_down", "on": False},
-     "effect": "Рудные самосвалы разгружаются на рудный склад, фабрика останавливается, нагрузка подстанции падает"},
-    {"id": "road_closed:road-ramp-west", "title": "Закрыть западный съезд (забой 545 → выезд)",
-     "cmd": {"action": "road_closed", "target": "road-ramp-west", "on": True},
-     "undo": {"action": "road_closed", "target": "road-ramp-west", "on": False},
-     "effect": "Самосвалы с уступа 545 идут объездом через уступ 530 и восточный съезд: цикл длиннее, расход топлива выше"},
-    {"id": "road_closed:road-main", "title": "Закрыть главную дорогу (выезд → развязка)",
-     "cmd": {"action": "road_closed", "target": "road-main", "on": True},
-     "undo": {"action": "road_closed", "target": "road-main", "on": False},
-     "effect": "Объезда нет: гружёные самосвалы останавливаются, дробилка переходит на склад, затем голодает"},
-    {"id": "fleet", "title": "Парк: 4 самосвала вместо 6",
-     "cmd": {"action": "fleet", "count": 4}, "undo": {"action": "fleet", "count": C.TRUCK_COUNT},
-     "effect": "Экскаваторы ждут самосвалы, производительность падает, очереди исчезают"},
-    {"id": "fleet8", "title": "Парк: 3 самосвала",
-     "cmd": {"action": "fleet", "count": 3}, "undo": {"action": "fleet", "count": C.TRUCK_COUNT},
-     "effect": "Половина парка: дробилка голодает, склад разгружается на питание"},
-    {"id": "cutoff", "title": "Бортовое содержание 0,45 % вместо 0,25 %",
-     "cmd": {"action": "cutoff", "value": 0.45}, "undo": {"action": "cutoff", "value": C.CUTOFF_GRADE},
-     "effect": "Бедные блоки становятся породой: коэффициент вскрыши растёт, содержание питания растёт, тонн руды меньше"},
-    {"id": "cutoff_low", "title": "Бортовое содержание 0,15 %",
-     "cmd": {"action": "cutoff", "value": 0.15}, "undo": {"action": "cutoff", "value": C.CUTOFF_GRADE},
-     "effect": "Почти всё идёт в руду: питание фабрики беднеет, извлечение падает, концентрата не прибавляется"},
+    {"id": "fan", "title": "ВГП: снижение подачи до 50 %",
+     "cmd": {"action": "fan", "speed_pct": 50}, "undo": {"action": "fan", "speed_pct": 100},
+     "effect": "Воздуха в панелях вдвое меньше: ПДМ теряют право работать, часть камер запрещается, звенья выводятся"},
+    {"id": "fan0", "title": "ВГП: остановка вентилятора",
+     "cmd": {"action": "fan", "speed_pct": 0}, "undo": {"action": "fan", "speed_pct": 100},
+     "effect": "Струи нет: все камеры запрещены, люди выводятся к стволу, датчики АГК показывают «нет струи»"},
+    {"id": "door:aw-door-3", "title": "Открыта вентиляционная дверь в сбойке 3",
+     "cmd": {"action": "door", "target": "aw-door-3", "on": True}, "undo": {"action": "door", "target": "aw-door-3", "on": False},
+     "effect": "Короткое замыкание струи: воздух уходит в вентиляционный штрек мимо панелей П-2 и П-3"},
+    {"id": "regulator:aw-p3-vent", "title": "Регулятор П-3 прикрыт на 60 % (больше воздуха в П-1 и П-2)",
+     "cmd": {"action": "regulator", "target": "aw-p3-vent", "closed_pct": 60}, "undo": {"action": "regulator", "target": "aw-p3-vent", "closed_pct": 0},
+     "effect": "Перераспределение струи: в П-2 появляется воздух под ПДМ, в П-3 его меньше"},
+    {"id": "blocked:aw-main-12", "title": "Обрушение в главном штреке 1–2",
+     "cmd": {"action": "blocked", "target": "aw-main-12", "on": True}, "undo": {"action": "blocked", "target": "aw-main-12", "on": False},
+     "effect": "Струя перестраивается через П-1 и вентиляционный штрек; у П-2 и П-3 нет свежего воздуха и пути к стволу"},
+    {"id": "extra_diesel:panel-1", "title": "В панель П-1 заехал самосвал CAT AD45B (429 кВт)",
+     "cmd": {"action": "extra_diesel", "target": "panel-1", "on": True}, "undo": {"action": "extra_diesel", "target": "panel-1", "on": False},
+     "effect": "Потребность панели в воздухе растёт на 2 900 м3/мин: ПДМ в камерах теряют допуск, CO/NO2 на исходящей растут"},
+    {"id": "seismic:panel-1", "title": "Сейсмический толчок 150 кДж в панели П-1",
+     "cmd": {"action": "seismic", "target": "panel-1", "energy": 150000}, "undo": None,
+     "effect": "Панель выводится на 2 часа, целики получают повреждение, запас прочности падает; сброс — кнопкой «Сбросить»"},
+    {"id": "pillar_extract:c1-24", "title": "Выемка целика 1-24 (повторная отработка)",
+     "cmd": {"action": "pillar_extract", "target": "c1-24", "on": True}, "undo": {"action": "pillar_extract", "target": "c1-24", "on": False},
+     "effect": "Нагрузка перекладывается на соседние целики: их SF падает, камеры рядом переходят в «наблюдение» или закрываются"},
+    {"id": "aux_fan_fail:k1-26", "title": "Отказ ВМП в камере 1-26",
+     "cmd": {"action": "aux_fan_fail", "target": "k1-26", "on": True}, "undo": {"action": "aux_fan_fail", "target": "k1-26", "on": False},
+     "effect": "Камера не проветривается: наряд в неё запрещён, звено выводится"},
 ]
 
 

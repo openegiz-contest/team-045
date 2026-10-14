@@ -1,0 +1,88 @@
+{
+ "uid": "vzhr-map",
+ "title": "ВЖР: план горизонта",
+ "tags": [
+  "vzhr",
+  "openegiz"
+ ],
+ "timezone": "browser",
+ "editable": true,
+ "refresh": "",
+ "schemaVersion": 39,
+ "version": 1,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 43,
+   "type": "text",
+   "title": "План горизонта (живой, из Ditto)",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 30
+   },
+   "options": {
+    "mode": "html",
+    "content": "<iframe src=\"http://localhost:8095/\" style=\"width:100%;height:100%;border:0;background:#0f1419\" title=\"VZHR level plan\"></iframe>"
+   }
+  },
+  {
+   "id": 44,
+   "type": "text",
+   "title": "Как читать план",
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 24,
+    "h": 4
+   },
+   "options": {
+    "mode": "markdown",
+    "content": "План строится из атрибутов двойников (выработки, панели, камеры, целики, датчики) и их features (состояния). Струи воздуха движутся по направлению и скорости из Ditto; цвет струи — чистота воздуха; камеры окрашены по вердикту наряда (зелёный разрешено, жёлтый ограничено, красный запрещено); целики — по запасу прочности. Справа: наряд смены с назначением звеньев, список запрещённых камер с причинами, сценарии «что если». Если iframe не отображается, откройте http://localhost:8095/"
+   }
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "annotations": {
+  "list": []
+ },
+ "links": [
+  {
+   "title": "План горизонта",
+   "type": "link",
+   "url": "http://localhost:8095/",
+   "targetBlank": true
+  },
+  {
+   "title": "Обзор смены",
+   "type": "link",
+   "url": "/d/vzhr-overview"
+  },
+  {
+   "title": "Воздух и газы",
+   "type": "link",
+   "url": "/d/vzhr-air"
+  },
+  {
+   "title": "Горное давление",
+   "type": "link",
+   "url": "/d/vzhr-ground"
+  },
+  {
+   "title": "Наряд и камеры",
+   "type": "link",
+   "url": "/d/vzhr-plan"
+  },
+  {
+   "title": "План в Grafana",
+   "type": "link",
+   "url": "/d/vzhr-map"
+  }
+ ]
+}

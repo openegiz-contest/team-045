@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Generate the Grafana dashboards of the Sarybulak mine as JSON files in
-team/grafana/dashboards/. They are provisioned by team/grafana/provisioning.yaml
-(mounted by team/compose.yml). Run after editing:
+Дашборды Grafana для горизонта ВЖР: JSON в team/grafana/dashboards/, которые
+подключает team/grafana/provisioning/vzhr.yaml (монтируется team/compose.yml).
+После правки:
 
     python3 team/grafana/build_dashboards.py
 
-Data: InfluxDB bucket `default`, measurement `mqtt_consumer`, tag `thingId`,
-field `value_<feature>_properties_value` (what Telegraf writes from Ditto's
-change events). Datasource uid `opentwins-influxdb` is provisioned by OpenEgiz.
+Данные: InfluxDB bucket `default`, measurement `mqtt_consumer`, тег `thingId`,
+поле `value_<feature>_properties_value` (так Telegraf пишет события Ditto).
+Источник данных uid `opentwins-influxdb` создаёт OpenEgiz.
 """
 
 import json
 import os
 
-NS = "org.openegiz.sarybulak"
+NS = "org.openegiz.zhezkazgan"
 NS_RE = NS.replace(".", "\\.")
 DS = {"type": "influxdb", "uid": "opentwins-influxdb"}
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboards")
@@ -41,7 +41,7 @@ def flux_many(regex, feature, label="twin"):
 
 def flux_last_table(regex, features):
     fl = " or ".join(f'r._field == "value_{f}_properties_value"' for f in features)
-    return (f'from(bucket: "default")\n  |> range(start: -5m)\n'
+    return (f'from(bucket: "default")\n  |> range(start: -10m)\n'
             f'  |> filter(fn: (r) => r.thingId =~ /^{NS_RE}:{regex}/ and ({fl}))\n'
             f'  |> group(columns: ["thingId", "_field"])\n  |> last()\n  |> group()\n'
             f'  |> pivot(rowKey: ["thingId"], columnKey: ["_field"], valueColumn: "_value")\n'
@@ -52,11 +52,11 @@ def target(q, ref="A"):
     return {"datasource": DS, "query": q, "refId": ref}
 
 
-def stat(title, q, unit="", x=0, y=0, w=4, h=4, decimals=None, color="blue", thresholds=None):
+def stat(title, q, unit="", x=0, y=0, w=4, h=4, decimals=None, color="blue", thresholds=None, text=False):
     p = {"id": nid(), "type": "stat", "title": title, "datasource": DS, "gridPos": {"x": x, "y": y, "w": w, "h": h},
          "targets": [target(q)],
-         "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}, "colorMode": "value",
-                     "graphMode": "area", "textMode": "value", "justifyMode": "auto"},
+         "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}, "colorMode": "none" if text else "value",
+                     "graphMode": "none" if text else "area", "textMode": "value", "justifyMode": "auto"},
          "fieldConfig": {"defaults": {"unit": unit, "color": {"mode": "fixed", "fixedColor": color}}, "overrides": []}}
     if decimals is not None:
         p["fieldConfig"]["defaults"]["decimals"] = decimals
@@ -66,28 +66,26 @@ def stat(title, q, unit="", x=0, y=0, w=4, h=4, decimals=None, color="blue", thr
     return p
 
 
-def ts(title, queries, unit="", x=0, y=0, w=12, h=8, stacked=False, min_=None, max_=None, legend_right=False):
+def ts(title, queries, unit="", x=0, y=0, w=12, h=8, min_=None, max_=None, thresholds=None):
     p = {"id": nid(), "type": "timeseries", "title": title, "datasource": DS, "gridPos": {"x": x, "y": y, "w": w, "h": h},
          "targets": [target(q, chr(65 + i)) for i, q in enumerate(queries)],
-         "options": {"legend": {"displayMode": "list", "placement": "right" if legend_right else "bottom", "showLegend": True},
-                     "tooltip": {"mode": "multi", "sort": "desc"}},
-         "fieldConfig": {"defaults": {"unit": unit, "custom": {"lineWidth": 2, "fillOpacity": 12 if not stacked else 60,
-                                                                  "stacking": {"mode": "normal" if stacked else "none"},
-                                                                  "spanNulls": True}},
-                         "overrides": []}}
+         "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": True}, "tooltip": {"mode": "multi", "sort": "desc"}},
+         "fieldConfig": {"defaults": {"unit": unit, "custom": {"lineWidth": 2, "fillOpacity": 10, "spanNulls": True}}, "overrides": []}}
     if min_ is not None:
         p["fieldConfig"]["defaults"]["min"] = min_
     if max_ is not None:
         p["fieldConfig"]["defaults"]["max"] = max_
+    if thresholds:
+        p["fieldConfig"]["defaults"]["thresholds"] = {"mode": "absolute", "steps": thresholds}
+        p["fieldConfig"]["defaults"]["custom"]["thresholdsStyle"] = {"mode": "line"}
     return p
 
 
 def table(title, q, x=0, y=0, w=24, h=9, renames=None):
-    p = {"id": nid(), "type": "table", "title": title, "datasource": DS, "gridPos": {"x": x, "y": y, "w": w, "h": h},
-         "targets": [target(q)], "options": {"showHeader": True, "cellHeight": "sm"},
-         "fieldConfig": {"defaults": {}, "overrides": []},
-         "transformations": [{"id": "organize", "options": {"renameByName": renames or {}}}]}
-    return p
+    return {"id": nid(), "type": "table", "title": title, "datasource": DS, "gridPos": {"x": x, "y": y, "w": w, "h": h},
+            "targets": [target(q)], "options": {"showHeader": True, "cellHeight": "sm"},
+            "fieldConfig": {"defaults": {}, "overrides": []},
+            "transformations": [{"id": "organize", "options": {"renameByName": renames or {}}}]}
 
 
 def text(title, content, x=0, y=0, w=24, h=4, mode="markdown"):
@@ -95,114 +93,133 @@ def text(title, content, x=0, y=0, w=24, h=4, mode="markdown"):
             "options": {"mode": mode, "content": content}}
 
 
-def dashboard(uid, title, panels, refresh="5s", rng="30m", tags=None):
-    return {"uid": uid, "title": title, "tags": tags or ["sarybulak", "openegiz"], "timezone": "browser", "editable": True,
+def dashboard(uid, title, panels, refresh="5s", rng="30m"):
+    return {"uid": uid, "title": title, "tags": ["vzhr", "openegiz"], "timezone": "browser", "editable": True,
             "refresh": refresh, "schemaVersion": 39, "version": 1, "time": {"from": f"now-{rng}", "to": "now"},
             "panels": panels, "templating": {"list": []}, "annotations": {"list": []}, "links": [
-                {"title": "Карта карьера", "type": "link", "url": "http://localhost:8095/", "targetBlank": True},
-                {"title": "Обзор", "type": "link", "url": "/d/sarybulak-overview"},
-                {"title": "Парк", "type": "link", "url": "/d/sarybulak-fleet"},
-                {"title": "Фабрика и энергия", "type": "link", "url": "/d/sarybulak-plant-energy"},
-                {"title": "Карта в Grafana", "type": "link", "url": "/d/sarybulak-map"}]}
+                {"title": "План горизонта", "type": "link", "url": "http://localhost:8095/", "targetBlank": True},
+                {"title": "Обзор смены", "type": "link", "url": "/d/vzhr-overview"},
+                {"title": "Воздух и газы", "type": "link", "url": "/d/vzhr-air"},
+                {"title": "Горное давление", "type": "link", "url": "/d/vzhr-ground"},
+                {"title": "Наряд и камеры", "type": "link", "url": "/d/vzhr-plan"},
+                {"title": "План в Grafana", "type": "link", "url": "/d/vzhr-map"}]}
+
+
+CO_LIMIT, NO2_LIMIT = 0.0016, 0.00026
+LIM_T = [{"color": "green", "value": None}, {"color": "red", "value": 26}]
 
 
 def overview():
     p = [
-        stat("Руда добыта", flux_one("mine", "ore_mined_t"), "t", 0, 0, 4, 4, 0, "orange"),
-        stat("Порода", flux_one("mine", "waste_mined_t"), "t", 4, 0, 4, 4, 0, "text"),
-        stat("Коэффициент вскрыши", flux_one("mine", "strip_ratio"), "", 8, 0, 4, 4, 2, "text"),
-        stat("Концентрат", flux_one("mine", "concentrate_t"), "t", 12, 0, 4, 4, 1, "green"),
-        stat("Медь в концентрате", flux_one("mine", "copper_in_concentrate_t"), "t", 16, 0, 4, 4, 2, "green"),
-        stat("Активные сценарии", flux_one("mine", "active_scenarios"), "", 20, 0, 4, 4, None, "yellow"),
-        stat("Дробилка, т/ч", flux_one("crusher", "throughput"), "", 0, 4, 4, 4, 0, "blue",
-             [{"color": "red", "value": None}, {"color": "yellow", "value": 300}, {"color": "green", "value": 700}]),
-        stat("Питание фабрики, % Cu", flux_one("crusher", "feed_grade"), "", 4, 4, 4, 4, 3, "blue",
-             [{"color": "red", "value": None}, {"color": "green", "value": 0.34}, {"color": "red", "value": 0.50}]),
-        stat("Извлечение, %", flux_one("flotation", "recovery"), "", 8, 4, 4, 4, 1, "green"),
-        stat("Нагрузка подстанции, кВт", flux_one("substation", "load"), "", 12, 4, 4, 4, 0, "purple"),
-        stat("Дизель, л/ч", flux_one("substation", "diesel_rate"), "", 16, 4, 4, 4, 0, "orange"),
-        stat("Готовность парка, %", flux_one("mine", "fleet_availability_pct"), "", 20, 4, 4, 4, 0, "green",
-             [{"color": "red", "value": None}, {"color": "yellow", "value": 70}, {"color": "green", "value": 90}]),
-        ts("Дробилка: производительность и питание", [flux_one("crusher", "throughput"), flux_one("crusher", "feed_grade")], "", 0, 8, 12, 8),
-        ts("Очереди у забоев и дробилки (самосвалов)", [flux_many("excavator-", "queue"), flux_one("crusher", "queue")], "", 12, 8, 12, 8),
-        ts("Содержание в забоях, % Cu", [flux_many("excavator-", "face_grade")], "", 0, 16, 12, 8),
-        ts("Рудный склад: тонны и содержание", [flux_one("stockpile", "tonnes"), flux_one("stockpile", "grade")], "", 12, 16, 12, 8),
-        ts("Цикл самосвала и ожидание, мин", [flux_one("dispatcher", "avg_cycle_min"), flux_one("dispatcher", "avg_queue_min")], "", 0, 24, 12, 8),
-        ts("Добыча нарастающим итогом, т", [flux_one("mine", "ore_mined_t"), flux_one("mine", "waste_mined_t")], "t", 12, 24, 12, 8),
+        stat("Смена №", flux_one("east-mine", "shift_no"), "", 0, 0, 3, 4, 0, "text"),
+        stat("Людей под землёй", flux_one("east-mine", "people_underground"), "", 3, 0, 3, 4, 0, "blue"),
+        stat("Камер: разрешено", flux_one("east-mine", "chambers_allowed"), "", 6, 0, 3, 4, 0, "green"),
+        stat("Камер: ограничено", flux_one("east-mine", "chambers_restricted"), "", 9, 0, 3, 4, 0, "yellow"),
+        stat("Камер: запрещено", flux_one("east-mine", "chambers_forbidden"), "", 12, 0, 3, 4, 0, "red"),
+        stat("ВГП, м³/с", flux_one("fan-main", "q"), "", 15, 0, 3, 4, 0, "blue",
+             [{"color": "red", "value": None}, {"color": "yellow", "value": 150}, {"color": "green", "value": 220}]),
+        stat("Выдано руды, т", flux_one("hoist", "tonnes_total"), "", 18, 0, 3, 4, 0, "orange"),
+        stat("Сигнал АГК", flux_one("east-mine", "alarm"), "", 21, 0, 3, 4, None, "red", text=True),
+        ts("Вердикты по камерам (разрешено / ограничено / запрещено)", [flux_one("east-mine", "chambers_allowed"), flux_one("east-mine", "chambers_restricted"), flux_one("east-mine", "chambers_forbidden")], "", 0, 4, 12, 8, min_=0),
+        ts("Воздух в панелях: подача, м³/с", [flux_many("panel-", "q_in")], "", 12, 4, 12, 8, min_=0),
+        ts("Люди и дизельная техника в панелях", [flux_many("panel-", "people"), flux_many("panel-", "diesel_kw")], "", 0, 12, 12, 8, min_=0),
+        ts("Выдача руды: подъём, т/ч, и накоплено, т", [flux_one("hoist", "throughput"), flux_one("hoist", "tonnes_total")], "", 12, 12, 12, 8, min_=0),
+        ts("Сейсмическая энергия за смену по панелям, Дж", [flux_many("panel-", "seismic_energy_shift")], "", 0, 20, 12, 8, min_=0),
+        ts("Потребность и наличие воздуха в панелях, м³/мин", [flux_many("panel-", "air_required"), flux_many("panel-", "air_available")], "", 12, 20, 12, 8, min_=0),
+        stat("Активные сценарии", flux_one("east-mine", "active_scenarios"), "", 0, 28, 12, 3, None, "yellow", text=True),
+        stat("Наряд смены", flux_one("shift-plan", "plan"), "", 12, 28, 12, 3, None, "text", text=True),
     ]
-    # fix the stat with a string value: text mode
-    p[5]["options"]["textMode"] = "value"
-    p[5]["options"]["graphMode"] = "none"
-    p[5]["options"]["colorMode"] = "none"
-    p[1]["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": "text"}
-    return dashboard("sarybulak-overview", "Sarybulak: обзор карьера", p)
+    return dashboard("vzhr-overview", "ВЖР: обзор смены", p)
 
 
-def fleet():
+def air():
     p = [
-        table("Парк самосвалов: последнее состояние", flux_last_table("truck-", ["state", "payload", "speed", "fuel", "fuel_rate", "trips_total", "hours", "health_pct", "destination", "assigned_excavator"]), 0, 0, 24, 9,
-              {"thingId": "Самосвал", "value_state_properties_value": "Состояние", "value_payload_properties_value": "Груз, т",
-               "value_speed_properties_value": "Скорость, км/ч", "value_fuel_properties_value": "Топливо, л",
-               "value_fuel_rate_properties_value": "Расход, л/ч", "value_trips_total_properties_value": "Рейсов",
-               "value_hours_properties_value": "Наработка, ч", "value_health_pct_properties_value": "Состояние, %",
-               "value_destination_properties_value": "Куда", "value_assigned_excavator_properties_value": "Экскаватор"}),
-        ts("Скорость самосвалов, км/ч", [flux_many("truck-", "speed")], "", 0, 9, 12, 8),
-        ts("Груз в кузове, т", [flux_many("truck-", "payload")], "t", 12, 9, 12, 8),
-        ts("Топливо в баке, л", [flux_many("truck-", "fuel")], "", 0, 17, 12, 8, min_=0),
-        ts("Рейсов, нарастающим итогом", [flux_many("truck-", "trips_total")], "", 12, 17, 12, 8),
-        ts("Экскаваторы: загрузка, %", [flux_many("excavator-", "utilization_pct")], "percent", 0, 25, 12, 8, min_=0, max_=100),
-        ts("Экскаваторы: очередь самосвалов", [flux_many("excavator-", "queue")], "", 12, 25, 12, 8),
-        ts("Трафик по дорогам (самосвалов на участке)", [flux_many("road-", "trucks_on_road")], "", 0, 33, 12, 8),
-        ts("Техническое состояние техники, %", [flux_many("truck-", "health_pct"), flux_many("excavator-", "health_pct")], "percent", 12, 33, 12, 8, min_=0, max_=100),
-        table("Экскаваторы", flux_last_table("excavator-", ["state", "block", "face_grade", "passes_total", "tonnes_loaded", "queue", "utilization_pct", "hours"]), 0, 41, 24, 5,
-              {"thingId": "Экскаватор", "value_state_properties_value": "Состояние", "value_block_properties_value": "Блок",
-               "value_face_grade_properties_value": "Содержание, % Cu", "value_passes_total_properties_value": "Ковшей",
-               "value_tonnes_loaded_properties_value": "Погружено, т", "value_queue_properties_value": "Очередь",
-               "value_utilization_pct_properties_value": "Загрузка, %", "value_hours_properties_value": "Наработка, ч"}),
+        stat("ВГП: подача, м³/с", flux_one("fan-main", "q"), "", 0, 0, 4, 4, 0, "blue"),
+        stat("ВГП: депрессия, Па", flux_one("fan-main", "pressure"), "", 4, 0, 4, 4, 0, "blue"),
+        stat("ВГП: обороты, %", flux_one("fan-main", "speed_pct"), "", 8, 0, 4, 4, 0, "blue"),
+        stat("Общая исходящая CO, % об.", flux_one("agk-vent", "co"), "", 12, 0, 4, 4, 5, "green",
+             [{"color": "green", "value": None}, {"color": "yellow", "value": CO_LIMIT / 2}, {"color": "red", "value": CO_LIMIT}]),
+        stat("Общая исходящая NO2, % об.", flux_one("agk-vent", "no2"), "", 16, 0, 4, 4, 6, "green",
+             [{"color": "green", "value": None}, {"color": "yellow", "value": NO2_LIMIT / 2}, {"color": "red", "value": NO2_LIMIT}]),
+        stat("Скорость струи, общая исходящая, м/с", flux_one("agk-vent", "velocity"), "", 20, 0, 4, 4, 1, "blue"),
+        ts("CO на датчиках АГК, % об. (ПДК 0,0016 %)", [flux_many("agk-", "co")], "", 0, 4, 12, 8, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": CO_LIMIT}]),
+        ts("NO2 на датчиках АГК, % об. (ПДК 0,00026 %)", [flux_many("agk-", "no2")], "", 12, 4, 12, 8, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": NO2_LIMIT}]),
+        ts("Расход по выработкам, м³/с", [flux_many("aw-", "q")], "", 0, 12, 12, 8, min_=0),
+        ts("Скорость струи по выработкам, м/с (0,25–8 м/с)", [flux_many("aw-", "velocity")], "", 12, 12, 12, 8, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 8}]),
+        ts("Температура на датчиках, °C (не выше 26)", [flux_many("agk-", "temp")], "", 0, 20, 12, 8, thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 26}]),
+        ts("CO в работающих камерах, % об.", [flux_many("k[1-3]-", "co")], "", 12, 20, 12, 8, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": CO_LIMIT}]),
+        table("Датчики АГК: последние показания", flux_last_table("agk-", ["co", "no2", "o2", "co2", "temp", "velocity", "alarm"]), 0, 28, 24, 6,
+              {"thingId": "Датчик", "value_co_properties_value": "CO, %", "value_no2_properties_value": "NO2, %", "value_o2_properties_value": "O2, %",
+               "value_co2_properties_value": "CO2, %", "value_temp_properties_value": "t, °C", "value_velocity_properties_value": "v, м/с", "value_alarm_properties_value": "Сигнал"}),
     ]
-    return dashboard("sarybulak-fleet", "Sarybulak: транспорт и диспетчеризация", p)
+    return dashboard("vzhr-air", "ВЖР: воздух и газы", p)
 
 
-def plant_energy():
+def ground():
     p = [
-        stat("Мельницы, т/ч", flux_one("mill", "throughput"), "", 0, 0, 4, 4, 0, "blue"),
-        stat("Удельная энергия измельчения, кВт·ч/т", flux_one("mill", "specific_energy"), "", 4, 0, 4, 4, 2, "purple"),
-        stat("Извлечение, %", flux_one("flotation", "recovery"), "", 8, 0, 4, 4, 1, "green"),
-        stat("Концентрат, т/ч", flux_one("flotation", "concentrate_tph"), "", 12, 0, 4, 4, 1, "green"),
-        stat("Хвосты, % Cu", flux_one("flotation", "tailings_grade"), "", 16, 0, 4, 4, 3, "text"),
-        stat("Электроэнергия всего, кВт·ч", flux_one("substation", "energy_total"), "", 20, 0, 4, 4, 0, "purple"),
-        ts("Мощность: дробилка, мельницы, подстанция, кВт", [flux_one("crusher", "power"), flux_one("mill", "power"), flux_one("substation", "load")], "kwatt", 0, 4, 12, 8),
-        ts("Питание фабрики и извлечение", [flux_one("mill", "feed_grade"), flux_one("flotation", "recovery")], "", 12, 4, 12, 8),
-        ts("Дизель: расход парка, л/ч", [flux_one("substation", "diesel_rate")], "", 0, 12, 12, 8),
-        ts("Расход топлива по самосвалам, л/ч", [flux_many("truck-", "fuel_rate")], "", 12, 12, 12, 8),
-        ts("Загрузка подстанции, %", [flux_one("substation", "load_pct")], "percent", 0, 20, 12, 8, min_=0, max_=100),
-        ts("CO₂ нарастающим итогом, т", [flux_one("substation", "co2_total")], "", 12, 20, 12, 8),
-        ts("Бункер дробилки, т", [flux_one("crusher", "bin_level")], "t", 0, 28, 12, 8, min_=0),
-        ts("Концентрат нарастающим итогом, т", [flux_one("flotation", "concentrate_total")], "t", 12, 28, 12, 8),
+        ts("Запас прочности целиков панели П-1 (SF; 1,3 и 1,5)", [flux_many("c1-", "sf")], "", 0, 0, 8, 9, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 1.3}, {"color": "yellow", "value": 1.5}]),
+        ts("Запас прочности целиков панели П-2", [flux_many("c2-", "sf")], "", 8, 0, 8, 9, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 1.3}, {"color": "yellow", "value": 1.5}]),
+        ts("Запас прочности целиков панели П-3", [flux_many("c3-", "sf")], "", 16, 0, 8, 9, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "red", "value": 1.3}, {"color": "yellow", "value": 1.5}]),
+        ts("Конвергенция, мм/сут (наблюдение 1,0; закрытие 2,5)", [flux_many("c[1-3]-", "convergence")], "", 0, 9, 12, 8, min_=0,
+           thresholds=[{"color": "transparent", "value": None}, {"color": "yellow", "value": 1.0}, {"color": "red", "value": 2.5}]),
+        ts("Сейсмика по панелям: толчков за смену и максимальная энергия, Дж", [flux_many("panel-", "bumps_shift"), flux_many("panel-", "max_bump_energy")], "", 12, 9, 12, 8, min_=0),
+        ts("Напряжение и прочность целиков П-1, МПа", [flux_many("c1-", "stress"), flux_many("c1-", "strength")], "", 0, 17, 12, 8, min_=0),
+        ts("Вынуто слоёв по панелям", [flux_many("panel-", "layers_mined")], "", 12, 17, 12, 8, min_=0),
+        table("Целики: последнее состояние", flux_last_table("c[1-3]-", ["height", "strength", "stress", "sf", "convergence", "status", "extracted"]), 0, 25, 24, 12,
+              {"thingId": "Целик", "value_height_properties_value": "Высота, м", "value_strength_properties_value": "Прочность, МПа", "value_stress_properties_value": "Напряжение, МПа",
+               "value_sf_properties_value": "SF", "value_convergence_properties_value": "Конвергенция, мм/сут", "value_status_properties_value": "Статус", "value_extracted_properties_value": "Извлечён"}),
     ]
-    return dashboard("sarybulak-plant-energy", "Sarybulak: фабрика и энергетика", p)
+    return dashboard("vzhr-ground", "ВЖР: горное давление и целики", p)
+
+
+def plan():
+    p = [
+        table("Наряд: звенья", flux_last_table("crew-", ["chamber", "task", "state", "people", "exposure_co"]), 0, 0, 12, 7,
+              {"thingId": "Звено", "value_chamber_properties_value": "Камера", "value_task_properties_value": "Работа", "value_state_properties_value": "Состояние",
+               "value_people_properties_value": "Чел.", "value_exposure_co_properties_value": "Экспозиция CO, %·ч"}),
+        table("Техника", flux_last_table("(pdm|sbu)-", ["chamber", "state", "kw_running", "tonnes_shift", "hours", "rounds_total"]), 12, 0, 12, 7,
+              {"thingId": "Машина", "value_chamber_properties_value": "Камера", "value_state_properties_value": "Состояние", "value_kw_running_properties_value": "кВт",
+               "value_tonnes_shift_properties_value": "т за смену", "value_hours_properties_value": "Наработка, ч", "value_rounds_total_properties_value": "Заходок"}),
+        table("Камеры: вердикт наряда", flux_last_table("k[1-3]-", ["state", "layer", "verdict", "reason", "crew", "people", "diesel_kw", "air", "air_required", "co", "temp"]), 0, 7, 24, 16,
+              {"thingId": "Камера", "value_state_properties_value": "Стадия", "value_layer_properties_value": "Слой", "value_verdict_properties_value": "Вердикт", "value_reason_properties_value": "Причина",
+               "value_crew_properties_value": "Звено", "value_people_properties_value": "Чел.", "value_diesel_kw_properties_value": "Дизель, кВт",
+               "value_air_properties_value": "Воздух, м³/мин", "value_air_required_properties_value": "Нужно, м³/мин", "value_co_properties_value": "CO, %", "value_temp_properties_value": "t, °C"}),
+        ts("Выпуск руды ПДМ за смену, т", [flux_many("pdm-", "tonnes_shift")], "", 0, 23, 12, 8, min_=0),
+        ts("Уровень рудоспусков, т", [flux_many("rs-", "level")], "", 12, 23, 12, 8, min_=0),
+    ]
+    return dashboard("vzhr-plan", "ВЖР: наряд, камеры и техника", p)
 
 
 def mapdash():
     p = [
-        text("Карта карьера (живая, из Ditto)",
-             '<iframe src="http://localhost:8095/" style="width:100%;height:100%;border:0;background:#0f1419" title="Sarybulak mine map"></iframe>',
+        text("План горизонта (живой, из Ditto)",
+             '<iframe src="http://localhost:8095/" style="width:100%;height:100%;border:0;background:#0f1419" title="VZHR level plan"></iframe>',
              0, 0, 24, 30, mode="html"),
-        text("Как читать карту",
-             "Карта строится из атрибутов двойников (геометрия уступов, блоков, дорог, объектов) и их features (состояния). "
-             "Самосвалы движутся по координатам из Ditto; цвет блока — содержание меди, штриховка — бурение и заряжание, "
-             "белая рамка — отрабатываемый блок. Кнопки справа запускают сценарии «что если» и отменяют их. "
-             "Если iframe не отображается, откройте карту напрямую: http://localhost:8095/", 0, 30, 24, 4),
+        text("Как читать план",
+             "План строится из атрибутов двойников (выработки, панели, камеры, целики, датчики) и их features (состояния). "
+             "Струи воздуха движутся по направлению и скорости из Ditto; цвет струи — чистота воздуха; камеры окрашены по вердикту наряда "
+             "(зелёный разрешено, жёлтый ограничено, красный запрещено); целики — по запасу прочности. Справа: наряд смены с назначением звеньев, "
+             "список запрещённых камер с причинами, сценарии «что если». Если iframe не отображается, откройте http://localhost:8095/", 0, 30, 24, 4),
     ]
-    return dashboard("sarybulak-map", "Sarybulak: карта карьера", p, refresh="")
+    return dashboard("vzhr-map", "ВЖР: план горизонта", p, refresh="")
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    for d in (overview(), fleet(), plant_energy(), mapdash()):
+    for f in os.listdir(OUT):
+        if f.endswith(".json"):
+            os.remove(os.path.join(OUT, f))
+    for d in (overview(), air(), ground(), plan(), mapdash()):
         path = os.path.join(OUT, f"{d['uid']}.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(d, f, ensure_ascii=False, indent=1)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, ensure_ascii=False, indent=1)
         print("wrote", path, len(d["panels"]), "panels")
 
 
