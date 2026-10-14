@@ -34,9 +34,10 @@ q=$(curl -sf -u "ditto:$DITTO_PASSWORD" "$DITTO/api/2/things/$NS:fan-main/featur
 if awk -v q="$q" 'BEGIN{exit !(q>100)}'; then pass "ВГП: подача $q м3/с (сеть рассчитана)"; else fail "ВГП: подача $q м3/с, вентиляционная сеть не рассчитана"; fi
 
 echo "История (Ditto -> Telegraf -> InfluxDB)"
-flux='from(bucket:"default") |> range(start:-10m) |> filter(fn:(r)=> r._measurement=="mqtt_consumer" and r.thingId=="'"$NS"':fan-main" and r._field=="value_q_properties_value") |> last()'
-if retry 10 sh -c "curl -sf -XPOST 'http://$H:$INFLUXDB_PORT/api/v2/query?org=opentwins' -H 'Authorization: Token $INFLUXDB_TOKEN' -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' --data-binary '$flux' | grep -q fan-main"; then
-  pass "точки подачи ВГП есть в InfluxDB"; else fail "в InfluxDB пока нет точек ВГП"; fi
+# двойник рудника меняется каждые 2 с, Telegraf пишет раз в 10 с: ждём до минуты
+flux='from(bucket:"default") |> range(start:-10m) |> filter(fn:(r)=> r._measurement=="mqtt_consumer" and r.thingId=="'"$NS"':east-mine" and r._field=="value_sim_time_h_properties_value") |> last()'
+if retry 20 sh -c "curl -sf -XPOST 'http://$H:$INFLUXDB_PORT/api/v2/query?org=opentwins' -H 'Authorization: Token $INFLUXDB_TOKEN' -H 'Content-Type: application/vnd.flux' -H 'Accept: application/csv' --data-binary '$flux' | grep -q east-mine"; then
+  pass "точки модельного времени рудника есть в InfluxDB"; else fail "в InfluxDB пока нет точек рудника (Telegraf пишет раз в 10 с)"; fi
 
 echo "Grafana"
 for uid in vzhr-overview vzhr-air vzhr-ground vzhr-plan vzhr-map; do
