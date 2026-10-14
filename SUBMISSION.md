@@ -1,4 +1,4 @@
-# SUBMISSION — карьер «Сарыбұлақ», команда ML
+# SUBMISSION — команда ML
 
 ## Concept
 
